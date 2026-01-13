@@ -46,6 +46,46 @@ flowchart LR
 | **Reputation Lists** | Integration with external IP blocklists |
 | **Multi-Scope** | Works with CloudFront (edge) and regional resources |
 
+## How It Works
+
+### Log Parser Lambda
+
+The `log_parser` Lambda function provides **reactive threat detection**:
+
+1. **Trigger**: WAF logs are written to S3, which sends a notification to SNS
+2. **Analysis**: Lambda parses the logs looking for:
+   - **HTTP Flood attacks** - IPs making excessive requests (DDoS patterns)
+   - **Scanners/Probes** - IPs triggering 4xx errors (vulnerability scanning)
+3. **Action**: Malicious IPs are added to WAF IP Sets, blocking future requests
+
+```
+S3 (WAF Logs) → SNS → log_parser Lambda → Updates IP Sets → WAF blocks IP
+```
+
+### Reputation Lists Parser Lambda
+
+The `reputation_lists_parser` Lambda provides **proactive threat prevention**:
+
+1. **Trigger**: CloudWatch Events runs the Lambda hourly
+2. **Fetch**: Downloads known-bad IP lists from threat intelligence sources:
+   - [Spamhaus DROP](https://www.spamhaus.org/drop/) - Known spammer networks
+   - [Spamhaus EDROP](https://www.spamhaus.org/drop/) - Extended drop list
+   - [Tor Exit Nodes](https://check.torproject.org/) - Anonymous proxy exits
+   - [Emerging Threats](https://rules.emergingthreats.net/) - Community blocklist
+3. **Action**: Updates WAF IP Sets to block these IPs before they attack
+
+```
+CloudWatch (hourly) → reputation_lists_parser Lambda → Fetches lists → Updates IP Sets
+```
+
+### IP Sets Updated
+
+| IP Set | Updated By | Purpose |
+|--------|------------|---------|
+| `HTTPFloodSetIPV4/V6` | log_parser | Blocks flood attackers |
+| `ScannersProbesSetIPV4/V6` | log_parser | Blocks vulnerability scanners |
+| `IPReputationListsSetIPV4/V6` | reputation_lists_parser | Blocks known-bad IPs |
+
 ## Prerequisites
 
 Before using this module, you must create:

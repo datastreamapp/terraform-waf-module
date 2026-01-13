@@ -412,7 +412,7 @@ This section provides traceability for all diagram elements to their source code
 | Terraform Validate | `.github/workflows/test.yml:27-28` | `terraform validate` |
 | Terraform fmt | `.github/workflows/test.yml:30-31` | `terraform fmt -check -recursive` |
 | tflint setup | `.github/workflows/test.yml:33-34` | `setup-tflint@v4` |
-| tflint run | `.github/workflows/test.yml:36-39` | `tflint --init && tflint .` |
+| tflint run | `.github/workflows/test.yml:36-39` | `tflint --init && tflint` |
 | tfsec | `.github/workflows/test.yml:41-42` | `tfsec-action@v1.0.0` |
 | checkov | `.github/workflows/test.yml:44-49` | `checkov-action@v12, soft_fail: true` |
 | Clone upstream | `.github/workflows/test.yml:58-61` | `git clone ... v4.0.3` |

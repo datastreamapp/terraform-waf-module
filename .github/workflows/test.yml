@@ -36,7 +36,7 @@ jobs:
       - name: Run tflint
         run: |
           tflint --init
-          tflint .
+          tflint
 
       - name: Run tfsec
         uses: aquasecurity/tfsec-action@v1.0.0
