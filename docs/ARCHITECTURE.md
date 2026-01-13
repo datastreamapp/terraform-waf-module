@@ -413,10 +413,10 @@ This section provides traceability for all diagram elements to their source code
 | Terraform fmt | `.github/workflows/test.yml:30-31` | `terraform fmt -check -recursive` |
 | tflint setup | `.github/workflows/test.yml:33-34` | `setup-tflint@v4` |
 | tflint run | `.github/workflows/test.yml:36-39` | `tflint --init && tflint` |
-| tfsec | `.github/workflows/test.yml:41-42` | `tfsec-action@v1.0.0` |
-| checkov | `.github/workflows/test.yml:44-49` | `checkov-action@v12, soft_fail: true` |
-| Clone upstream | `.github/workflows/test.yml:58-61` | `git clone ... v4.0.3` |
-| Docker build | `.github/workflows/test.yml:63-64` | `docker build -t lambda-builder` |
-| Test log_parser | `.github/workflows/test.yml:66-71` | `lambda-builder log_parser` |
-| Test reputation_lists | `.github/workflows/test.yml:73-78` | `lambda-builder reputation_lists_parser` |
-| Summary output | `.github/workflows/test.yml:80-89` | `GITHUB_STEP_SUMMARY` |
+| tfsec | `.github/workflows/test.yml:41-44` | `tfsec-action@v1.0.0, --minimum-severity HIGH` |
+| checkov | `.github/workflows/test.yml:46-52` | `checkov-action@v12, soft_fail: true` |
+| Clone upstream | `.github/workflows/test.yml:60-63` | `git clone ... v4.0.3` |
+| Docker build | `.github/workflows/test.yml:65-66` | `docker build -t lambda-builder` |
+| Test log_parser | `.github/workflows/test.yml:68-73` | `lambda-builder log_parser` |
+| Test reputation_lists | `.github/workflows/test.yml:75-80` | `lambda-builder reputation_lists_parser` |
+| Summary output | `.github/workflows/test.yml:82-92` | `GITHUB_STEP_SUMMARY` |
