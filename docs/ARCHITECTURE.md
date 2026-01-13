@@ -259,6 +259,7 @@ terraform-waf-module/
 ├── lambda.log-parser.tf               # Lambda TF config
 ├── lambda.reputation-list.tf          # Lambda TF config
 ├── main.tf                            # WAF Web ACL
+├── Makefile                           # Build and test automation
 ├── CHANGELOG.md                       # Version history
 ├── TODOLIST.md                        # Implementation tasks
 └── README.md                          # Project documentation

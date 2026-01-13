@@ -303,9 +303,9 @@ unzip lambda/log_parser.zip -d /tmp/inspect && ls -la /tmp/inspect
 
 ---
 
-## 8. Makefile (Optional)
+## 8. Makefile
 
-Create a `Makefile` for convenience:
+The project includes a `Makefile` for convenience:
 
 ```makefile
 .PHONY: test validate fmt security build clean

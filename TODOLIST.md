@@ -23,13 +23,14 @@ Reference: [Issue #801](https://github.com/datastreamapp/issues/issues/801)
 
 ## Deliverables
 
-### Files Created (7)
+### Files Created (8)
 
 - [x] `scripts/Dockerfile.lambda-builder` - Docker build environment
 - [x] `scripts/build-lambda.sh` - Build script with validation tests
 - [x] `.github/workflows/build-lambda-packages.yml` - CI/CD workflow
 - [x] `docs/ARCHITECTURE.md` - Mermaid architecture diagrams with code references
 - [x] `docs/TESTING.md` - Comprehensive testing guide
+- [x] `Makefile` - Build and test automation
 - [x] `TODOLIST.md` - This file
 - [x] `CHANGELOG.md` - Version history with Python rationale
 
@@ -39,7 +40,7 @@ Reference: [Issue #801](https://github.com/datastreamapp/issues/issues/801)
 - [x] `lambda.reputation-list.tf` - Updated runtime to python3.13 (line 94)
 - [x] `README.md` - Complete rewrite with Mermaid diagrams
 
-**Total: 7 files created, 3 files modified**
+**Total: 8 files created, 3 files modified**
 
 ---
 
