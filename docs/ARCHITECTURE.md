@@ -6,53 +6,57 @@ This document describes the architecture of the terraform-waf-module and its CI/
 
 ```mermaid
 flowchart TB
-    subgraph AWS["AWS Cloud"]
+    subgraph Module["This Module Creates"]
         subgraph WAF["AWS WAF"]
-            ACL[Web ACL]
-            Rules[WAF Rules]
+            ACL[Web ACL<br/>main.tf:3]
+            Rules[WAF Rules<br/>main.tf]
         end
 
         subgraph Lambda["Lambda Functions"]
-            LP[("log_parser<br/>Python 3.13")]
-            RP[("reputation_lists_parser<br/>Python 3.13")]
+            LP[("log_parser<br/>lambda.log-parser.tf:169")]
+            RP[("reputation_lists_parser<br/>lambda.reputation-list.tf:86")]
         end
 
         subgraph Storage["Storage"]
-            S3[(S3 Logs Bucket)]
-            IPSet[(WAF IP Sets)]
+            IPSet[(WAF IP Sets<br/>ipset.tf)]
         end
 
         subgraph Triggers["Triggers"]
-            SNS[SNS Topic]
-            CW[CloudWatch Events]
+            SNS[SNS Topic<br/>lambda.log-parser.tf:259]
+            CW[CloudWatch Events<br/>lambda.reputation-list.tf:131]
         end
+
+        Output[/"Output: WAF ARN<br/>output.tf:2"/]
     end
 
-    subgraph Protected["Protected Resources"]
+    subgraph External["External - Consumer Responsibility"]
+        S3[(S3 Logs Bucket<br/>var.logging_bucket)]
         CF[CloudFront]
         ALB[ALB]
         APIGW[API Gateway]
+        Note["Associate WAF using<br/>aws_wafv2_web_acl_association"]
     end
 
-    Internet((Internet)) --> CF & ALB & APIGW
-    CF & ALB & APIGW --> ACL
+    CF & ALB & APIGW -.->|"Consumer associates"| ACL
     ACL --> Rules
-    Rules --> S3
-    S3 --> SNS
+    S3 -->|"Log prefixes:<br/>CloudFront/, ALB/, WAF/<br/>lambda.log-parser.tf:236,245,254"| SNS
     SNS --> LP
     LP --> IPSet
-    CW -->|Hourly| RP
+    CW -->|"rate(1 hour)<br/>:135"| RP
     RP --> IPSet
     IPSet --> Rules
+    ACL --> Output
 
-    classDef aws fill:#FF9900,stroke:#232F3E,color:#232F3E
+    classDef module fill:#28a745,stroke:#28a745,color:white
+    classDef external fill:#6c757d,stroke:#6c757d,color:white
     classDef lambda fill:#FF9900,stroke:#232F3E,color:white
-    classDef storage fill:#3B48CC,stroke:#232F3E,color:white
 
-    class ACL,Rules aws
+    class Module module
+    class External external
     class LP,RP lambda
-    class S3,IPSet storage
 ```
+
+> **Note:** This module creates the WAF Web ACL and outputs its ARN. The consumer must create their own CloudFront, ALB, or API Gateway and associate them with the WAF using `aws_wafv2_web_acl_association`.
 
 ## CI/CD Build Pipeline
 
@@ -246,16 +250,45 @@ This section provides traceability for all diagram elements to their source code
 
 ### System Overview Diagram
 
+#### Resources Created by This Module
+
+| Diagram Element | File:Line | Evidence |
+|-----------------|-----------|----------|
+| WAF Web ACL | `main.tf:3` | `resource "aws_wafv2_web_acl" "main"` |
+| WAF scope (CLOUDFRONT/REGIONAL) | `main.tf:5`, `variables.tf:6-8` | `scope = var.scope` |
+| Output WAF ARN | `output.tf:2` | `value = aws_wafv2_web_acl.main.arn` |
+| log_parser Lambda | `lambda.log-parser.tf:169` | `resource "aws_lambda_function" "log-parser"` |
+| reputation_lists_parser Lambda | `lambda.reputation-list.tf:86` | `resource "aws_lambda_function" "reputation-list"` |
+| SNS Topic | `lambda.log-parser.tf:259` | `resource "aws_sns_topic" "log-parser"` |
+| CloudWatch Event Rule | `lambda.reputation-list.tf:131` | `resource "aws_cloudwatch_event_rule" "reputation-list"` |
+| IP Sets | `ipset.tf:6,17,28,39,50,61,73,84,95,106,117,128` | Multiple `aws_wafv2_ip_set` resources |
+
+#### Trigger Configuration
+
 | Diagram Element | File:Line | Evidence |
 |-----------------|-----------|----------|
 | log_parser triggered by SNS | `lambda.log-parser.tf:287-291` | `aws_sns_topic_subscription.log-parser` |
 | S3 notifications to SNS | `lambda.log-parser.tf:227-257` | `aws_s3_bucket_notification.log-parser` |
 | S3 prefixes: CloudFront, ALB, WAF | `lambda.log-parser.tf:236,245,254` | `filter_prefix` for each log type |
 | reputation_lists_parser hourly trigger | `lambda.reputation-list.tf:131-136` | `schedule_expression = "rate(1 hour)"` |
+
+#### IP Set Updates
+
+| Diagram Element | File:Line | Evidence |
+|-----------------|-----------|----------|
 | log_parser updates HTTP Flood IP Sets | `lambda.log-parser.tf:153-154` | `HTTPFloodSetIPV4.arn`, `HTTPFloodSetIPV6.arn` |
 | log_parser updates Scanners/Probes IP Sets | `lambda.log-parser.tf:106-107` | `ScannersProbesSetIPV4.arn`, `ScannersProbesSetIPV6.arn` |
 | reputation_lists_parser updates Reputation IP Sets | `lambda.reputation-list.tf:50-51` | `IPReputationListsSetIPV4.arn`, `IPReputationListsSetIPV6.arn` |
 | Python 3.13 runtime | `lambda.log-parser.tf:176`, `lambda.reputation-list.tf:94` | `runtime = "python3.13"` |
+
+#### External Resources (NOT Created by This Module)
+
+| Element | Status | Consumer Action Required |
+|---------|--------|--------------------------|
+| CloudFront Distribution | **NOT IN MODULE** | Consumer creates and associates using `aws_wafv2_web_acl_association` |
+| Application Load Balancer | **NOT IN MODULE** | Consumer creates and associates using `aws_wafv2_web_acl_association` |
+| API Gateway | **NOT IN MODULE** | Consumer creates and associates using `aws_wafv2_web_acl_association` |
+| S3 Logs Bucket | **NOT IN MODULE** | Consumer provides via `var.logging_bucket` |
 
 ### Reputation Lists - External URLs
 

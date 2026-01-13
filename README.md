@@ -13,11 +13,20 @@ This module deploys a complete WAF solution including:
 
 ```mermaid
 flowchart LR
-    Internet((Internet)) --> WAF[AWS WAF]
-    WAF --> Protected[CloudFront/ALB/API GW]
-    WAF -->|Logs| Lambda[Lambda Functions]
+    subgraph Module["This Module"]
+        WAF[AWS WAF]
+        Lambda[Lambda Functions]
+    end
+    subgraph External["Consumer Creates"]
+        Protected[CloudFront/ALB/API GW]
+    end
+    Internet((Internet)) --> Protected
+    Protected -.->|Associate| WAF
+    WAF -->|Logs| Lambda
     Lambda -->|Block IPs| WAF
 ```
+
+> **Note:** This module creates the WAF and outputs its ARN. You must create your own CloudFront/ALB/API Gateway and associate them using `aws_wafv2_web_acl_association`.
 
 ## Features
 
@@ -50,7 +59,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture diagr
 
 ```mermaid
 flowchart TB
-    subgraph AWS["AWS Cloud"]
+    subgraph Module["This Module Creates"]
         subgraph WAF["AWS WAF"]
             ACL[Web ACL]
             Rules[WAF Rules]
@@ -62,7 +71,6 @@ flowchart TB
         end
 
         subgraph Storage["Storage"]
-            S3[(S3 Logs Bucket)]
             IPSet[(WAF IP Sets)]
         end
 
@@ -70,25 +78,29 @@ flowchart TB
             SNS[SNS Topic]
             CW[CloudWatch Events]
         end
+
+        Output[/"Output: WAF ARN"/]
     end
 
-    subgraph Protected["Protected Resources"]
+    subgraph External["Consumer Responsibility"]
+        S3[(S3 Logs Bucket)]
         CF[CloudFront]
         ALB[ALB]
         APIGW[API Gateway]
     end
 
-    Internet((Internet)) --> CF & ALB & APIGW
-    CF & ALB & APIGW --> ACL
+    CF & ALB & APIGW -.->|"Associate WAF"| ACL
     ACL --> Rules
-    Rules --> S3
     S3 --> SNS
     SNS --> LP
     LP --> IPSet
     CW -->|Hourly| RP
     RP --> IPSet
     IPSet --> Rules
+    ACL --> Output
 ```
+
+> See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for code references proving each element.
 
 ### Lambda Functions
 
