@@ -24,6 +24,13 @@ flowchart LR
     Protected -.->|Associate| WAF
     WAF -->|Logs| Lambda
     Lambda -->|Block IPs| WAF
+
+    style Module fill:#d4edda,stroke:#28a745,color:#155724
+    style External fill:#e2e3e5,stroke:#6c757d,color:#383d41
+    classDef wafNode fill:#FF9900,stroke:#232F3E,color:white
+    classDef extNode fill:#6c757d,stroke:#495057,color:white
+    class WAF,Lambda wafNode
+    class Protected extNode
 ```
 
 > **Note:** This module creates the WAF and outputs its ARN. You must create your own CloudFront/ALB/API Gateway and associate them using `aws_wafv2_web_acl_association`.
@@ -98,6 +105,27 @@ flowchart TB
     RP --> IPSet
     IPSet --> Rules
     ACL --> Output
+
+    style Module fill:#d4edda,stroke:#28a745,color:#155724
+    style External fill:#e2e3e5,stroke:#6c757d,color:#383d41
+    style WAF fill:#fff3cd,stroke:#ffc107,color:#856404
+    style Lambda fill:#fff3cd,stroke:#FF9900,color:#856404
+    style Storage fill:#cce5ff,stroke:#004085,color:#004085
+    style Triggers fill:#f8d7da,stroke:#721c24,color:#721c24
+
+    classDef wafNode fill:#FF9900,stroke:#232F3E,color:white
+    classDef lambdaNode fill:#FF9900,stroke:#232F3E,color:white
+    classDef storageNode fill:#3B48CC,stroke:#232F3E,color:white
+    classDef triggerNode fill:#E7157B,stroke:#232F3E,color:white
+    classDef externalNode fill:#6c757d,stroke:#495057,color:white
+    classDef outputNode fill:#28a745,stroke:#1e7e34,color:white
+
+    class ACL,Rules wafNode
+    class LP,RP lambdaNode
+    class IPSet,S3 storageNode
+    class SNS,CW triggerNode
+    class CF,ALB,APIGW externalNode
+    class Output outputNode
 ```
 
 > See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for code references proving each element.
@@ -247,6 +275,7 @@ Current version: See [CHANGELOG.md](CHANGELOG.md)
 | [CHANGELOG.md](CHANGELOG.md) | Version history and decisions |
 | [TODOLIST.md](TODOLIST.md) | Implementation tasks |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Architecture diagrams |
+| [docs/TESTING.md](docs/TESTING.md) | Testing guide |
 
 ## File Structure
 
@@ -257,6 +286,7 @@ terraform-waf-module/
 |     |- build-lambda-packages.yml  # CI/CD pipeline
 |- docs/
 |  |- ARCHITECTURE.md               # Architecture diagrams
+|  |- TESTING.md                    # Testing guide
 |- lambda/
 |  |- log_parser.zip                # Built artifact
 |  |- reputation_lists_parser.zip   # Built artifact

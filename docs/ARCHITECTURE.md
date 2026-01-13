@@ -47,13 +47,26 @@ flowchart TB
     IPSet --> Rules
     ACL --> Output
 
-    classDef module fill:#28a745,stroke:#28a745,color:white
-    classDef external fill:#6c757d,stroke:#6c757d,color:white
-    classDef lambda fill:#FF9900,stroke:#232F3E,color:white
+    style Module fill:#d4edda,stroke:#28a745,color:#155724
+    style External fill:#e2e3e5,stroke:#6c757d,color:#383d41
+    style WAF fill:#fff3cd,stroke:#ffc107,color:#856404
+    style Lambda fill:#fff3cd,stroke:#FF9900,color:#856404
+    style Storage fill:#cce5ff,stroke:#004085,color:#004085
+    style Triggers fill:#f8d7da,stroke:#721c24,color:#721c24
 
-    class Module module
-    class External external
-    class LP,RP lambda
+    classDef wafNode fill:#FF9900,stroke:#232F3E,color:white
+    classDef lambdaNode fill:#FF9900,stroke:#232F3E,color:white
+    classDef storageNode fill:#3B48CC,stroke:#232F3E,color:white
+    classDef triggerNode fill:#E7157B,stroke:#232F3E,color:white
+    classDef externalNode fill:#6c757d,stroke:#495057,color:white
+    classDef outputNode fill:#28a745,stroke:#1e7e34,color:white
+
+    class ACL,Rules wafNode
+    class LP,RP lambdaNode
+    class IPSet,S3 storageNode
+    class SNS,CW triggerNode
+    class CF,ALB,APIGW,Note externalNode
+    class Output outputNode
 ```
 
 > **Note:** This module creates the WAF Web ACL and outputs its ARN. The consumer must create their own CloudFront, ALB, or API Gateway and associate them with the WAF using `aws_wafv2_web_acl_association`.
@@ -226,7 +239,8 @@ terraform-waf-module/
 │   └── workflows/
 │       └── build-lambda-packages.yml  # CI/CD pipeline
 ├── docs/
-│   └── ARCHITECTURE.md                # This file
+│   ├── ARCHITECTURE.md                # This file
+│   └── TESTING.md                     # Testing guide
 ├── lambda/
 │   ├── log_parser.zip                 # Built artifact
 │   ├── reputation_lists_parser.zip    # Built artifact
