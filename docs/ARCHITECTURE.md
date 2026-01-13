@@ -120,6 +120,49 @@ flowchart LR
     linkStyle default stroke:#333,stroke-width:2px
 ```
 
+## CI/CD Test Workflow (test.yml)
+
+This workflow runs automatically on every push to `master` and on pull requests.
+
+```mermaid
+flowchart LR
+    subgraph Trigger["Triggers"]
+        Push["Push to master<br/>.github/workflows/test.yml:4-5"]
+        PR["Pull Request<br/>.github/workflows/test.yml:6-7"]
+    end
+
+    subgraph TerraformJob["Job: terraform"]
+        direction TB
+        T1["Checkout<br/>:18-19"]
+        T2["terraform init<br/>:24-25"]
+        T3["terraform validate<br/>:27-28"]
+        T4["terraform fmt -check<br/>:30-31"]
+        T5["tflint<br/>:33-39"]
+        T6["tfsec<br/>:41-42"]
+        T7["checkov<br/>:44-49"]
+        T1 --> T2 --> T3 --> T4 --> T5 --> T6 --> T7
+    end
+
+    subgraph LambdaJob["Job: lambda"]
+        direction TB
+        L1["Checkout<br/>:55-56"]
+        L2["Clone upstream<br/>:58-61"]
+        L3["Build Docker<br/>:63-64"]
+        L4["Test log_parser<br/>:66-71"]
+        L5["Test reputation_lists<br/>:73-78"]
+        L1 --> L2 --> L3 --> L4 --> L5
+    end
+
+    Push & PR --> TerraformJob
+    Push & PR --> LambdaJob
+
+    style Trigger fill:#f8d7da,stroke:#721c24,color:#721c24
+    style TerraformJob fill:#d4edda,stroke:#28a745,color:#155724
+    style LambdaJob fill:#cce5ff,stroke:#004085,color:#004085
+
+    linkStyle default stroke:#333,stroke-width:2px
+```
+
 ## Build Process Detail
 
 ```mermaid
@@ -358,3 +401,22 @@ This section provides traceability for all diagram elements to their source code
 | Build reputation_lists_parser.zip | `.github/workflows/build-lambda-packages.yml:110-116` | `docker run ... reputation_lists_parser` |
 | pip-audit security scan | `.github/workflows/build-lambda-packages.yml:118-130` | `pip-audit -r ...` |
 | Create PR | `.github/workflows/build-lambda-packages.yml:148-206` | `peter-evans/create-pull-request@v6` |
+
+### CI/CD Test Workflow (test.yml)
+
+| Step | File:Line | Evidence |
+|------|-----------|----------|
+| Workflow triggers | `.github/workflows/test.yml:3-7` | `on: push, pull_request` |
+| Security permissions | `.github/workflows/test.yml:9-11` | `permissions: contents: read` |
+| Terraform Init | `.github/workflows/test.yml:24-25` | `terraform init -backend=false` |
+| Terraform Validate | `.github/workflows/test.yml:27-28` | `terraform validate` |
+| Terraform fmt | `.github/workflows/test.yml:30-31` | `terraform fmt -check -recursive` |
+| tflint setup | `.github/workflows/test.yml:33-34` | `setup-tflint@v4` |
+| tflint run | `.github/workflows/test.yml:36-39` | `tflint --init && tflint .` |
+| tfsec | `.github/workflows/test.yml:41-42` | `tfsec-action@v1.0.0` |
+| checkov | `.github/workflows/test.yml:44-49` | `checkov-action@v12, soft_fail: true` |
+| Clone upstream | `.github/workflows/test.yml:58-61` | `git clone ... v4.0.3` |
+| Docker build | `.github/workflows/test.yml:63-64` | `docker build -t lambda-builder` |
+| Test log_parser | `.github/workflows/test.yml:66-71` | `lambda-builder log_parser` |
+| Test reputation_lists | `.github/workflows/test.yml:73-78` | `lambda-builder reputation_lists_parser` |
+| Summary output | `.github/workflows/test.yml:80-89` | `GITHUB_STEP_SUMMARY` |

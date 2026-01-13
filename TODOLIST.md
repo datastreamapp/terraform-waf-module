@@ -244,6 +244,8 @@ git checkout master -- .github/workflows/
 - [x] Testing documentation complete
 - [x] CI/CD test workflow implemented
 - [x] All tests pass locally
+- [x] test.yml workflow diagram added to ARCHITECTURE.md
+- [x] Code references verified for test.yml (14 steps documented)
 
 ---
 

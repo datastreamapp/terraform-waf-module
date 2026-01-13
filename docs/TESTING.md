@@ -262,6 +262,8 @@ Location: /output/log_parser.zip
 
 Tests run automatically in GitHub Actions on every PR and push to `master`.
 
+> **Diagram:** See `docs/ARCHITECTURE.md` → "CI/CD Test Workflow (test.yml)" for visual workflow diagram with code references.
+
 ### 6.1 Test Workflow
 
 **File:** `.github/workflows/test.yml`
