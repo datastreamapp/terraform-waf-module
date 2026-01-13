@@ -67,6 +67,8 @@ flowchart TB
     class SNS,CW triggerNode
     class CF,ALB,APIGW,Note externalNode
     class Output outputNode
+
+    linkStyle default stroke:#333,stroke-width:2px
 ```
 
 > **Note:** This module creates the WAF Web ACL and outputs its ARN. The consumer must create their own CloudFront, ALB, or API Gateway and associate them with the WAF using `aws_wafv2_web_acl_association`.
@@ -114,6 +116,8 @@ flowchart LR
     style Pos fill:#28a745,stroke:#28a745,color:white
     style Neg fill:#dc3545,stroke:#dc3545,color:white
     style Sec fill:#6f42c1,stroke:#6f42c1,color:white
+
+    linkStyle default stroke:#333,stroke-width:2px
 ```
 
 ## Build Process Detail
@@ -158,6 +162,8 @@ flowchart TD
     F --> T1 --> T2 --> T3 --> T4 --> T5 --> T6 --> T7 --> T8 --> ZIP
 
     style ZIP fill:#28a745,stroke:#28a745,color:white
+
+    linkStyle default stroke:#333,stroke-width:2px
 ```
 
 ## Lambda Function Flow
@@ -229,6 +235,8 @@ flowchart LR
     style P313 fill:#28a745,stroke:#28a745,color:white
     style Winner fill:#28a745,stroke:#28a745,color:white
     style P314 fill:#ffc107,stroke:#ffc107,color:black
+
+    linkStyle default stroke:#333,stroke-width:2px
 ```
 
 ## File Structure

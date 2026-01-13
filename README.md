@@ -31,6 +31,8 @@ flowchart LR
     classDef extNode fill:#6c757d,stroke:#495057,color:white
     class WAF,Lambda wafNode
     class Protected extNode
+
+    linkStyle default stroke:#333,stroke-width:2px
 ```
 
 > **Note:** This module creates the WAF and outputs its ARN. You must create your own CloudFront/ALB/API Gateway and associate them using `aws_wafv2_web_acl_association`.
@@ -126,6 +128,8 @@ flowchart TB
     class SNS,CW triggerNode
     class CF,ALB,APIGW externalNode
     class Output outputNode
+
+    linkStyle default stroke:#333,stroke-width:2px
 ```
 
 > See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for code references proving each element.
@@ -206,6 +210,8 @@ flowchart LR
     C --> D[Create PR]
     D --> E[Review & Merge]
     E --> F[Tag Release]
+
+    linkStyle default stroke:#333,stroke-width:2px
 ```
 
 1. Go to **Actions** > **Build WAF Lambda Packages**
