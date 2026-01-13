@@ -1,0 +1,206 @@
+name: Build WAF Lambda Packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      upstream_ref:
+        description: 'Upstream repo tag (e.g., v4.0.3)'
+        default: 'v4.0.3'
+        required: true
+        type: string
+      version_bump:
+        description: 'Version bump type for this release'
+        required: true
+        type: choice
+        options:
+          - 'none'
+          - 'patch'
+          - 'minor'
+          - 'major'
+        default: 'none'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  UPSTREAM_REPO: aws-solutions/aws-waf-security-automations
+  PYTHON_VERSION: '3.13'
+
+jobs:
+  build:
+    name: Build Lambda Packages
+    runs-on: ubuntu-latest
+    outputs:
+      current_version: ${{ steps.version.outputs.current }}
+      next_version: ${{ steps.version.outputs.next }}
+
+    steps:
+      - name: Checkout terraform-waf-module
+        uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - name: Calculate version
+        id: version
+        run: |
+          CURRENT=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          echo "current=${CURRENT}" >> $GITHUB_OUTPUT
+
+          VERSION=${CURRENT#v}
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+
+          case "${{ inputs.version_bump }}" in
+            major)
+              NEXT="v$((MAJOR + 1)).0.0"
+              ;;
+            minor)
+              NEXT="v${MAJOR}.$((MINOR + 1)).0"
+              ;;
+            patch)
+              NEXT="v${MAJOR}.${MINOR}.$((PATCH + 1))"
+              ;;
+            none)
+              NEXT="none"
+              ;;
+          esac
+
+          echo "next=${NEXT}" >> $GITHUB_OUTPUT
+          echo "Current version: ${CURRENT}"
+          echo "Next version: ${NEXT}"
+
+      - name: Checkout upstream WAF repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.UPSTREAM_REPO }}
+          ref: ${{ inputs.upstream_ref }}
+          path: upstream
+          sparse-checkout: |
+            source/log_parser
+            source/reputation_lists_parser
+            source/lib
+
+      - name: Verify upstream checkout
+        run: |
+          echo "Verifying upstream source directories..."
+          for dir in log_parser reputation_lists_parser lib; do
+            if [[ ! -d "upstream/source/${dir}" ]]; then
+              echo "ERROR: upstream/source/${dir} not found"
+              exit 1
+            fi
+            echo "upstream/source/${dir} exists"
+          done
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        run: |
+          docker build -t lambda-builder -f scripts/Dockerfile.lambda-builder scripts/
+
+      - name: Build log_parser.zip
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}/upstream:/upstream:ro \
+            -v ${{ github.workspace }}/lambda:/output \
+            lambda-builder \
+            log_parser /upstream /output
+
+      - name: Build reputation_lists_parser.zip
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}/upstream:/upstream:ro \
+            -v ${{ github.workspace }}/lambda:/output \
+            lambda-builder \
+            reputation_lists_parser /upstream /output
+
+      - name: Security scan - pip-audit
+        continue-on-error: true
+        run: |
+          pip install pip-audit poetry
+          echo "=== Scanning log_parser dependencies ==="
+          cd upstream/source/log_parser
+          poetry export --without dev -f requirements.txt -o /tmp/log_parser_reqs.txt 2>/dev/null || true
+          pip-audit -r /tmp/log_parser_reqs.txt --desc || true
+
+          echo "=== Scanning reputation_lists_parser dependencies ==="
+          cd ../reputation_lists_parser
+          poetry export --without dev -f requirements.txt -o /tmp/rep_parser_reqs.txt 2>/dev/null || true
+          pip-audit -r /tmp/rep_parser_reqs.txt --desc || true
+
+      - name: Final validation summary
+        run: |
+          echo "============================================"
+          echo "BUILD SUMMARY"
+          echo "============================================"
+          echo ""
+          echo "Packages built:"
+          ls -lh lambda/*.zip
+          echo ""
+          echo "Zip contents preview:"
+          for zip in lambda/log_parser.zip lambda/reputation_lists_parser.zip; do
+            echo "--- ${zip} ---"
+            unzip -l "$zip" | head -20
+            echo ""
+          done
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: |
+            feat: rebuild WAF Lambda packages from upstream ${{ inputs.upstream_ref }}
+
+            - Rebuilt log_parser.zip
+            - Rebuilt reputation_lists_parser.zip
+            - Python runtime: ${{ env.PYTHON_VERSION }}
+            - Source: ${{ env.UPSTREAM_REPO }}@${{ inputs.upstream_ref }}
+          branch: automated/lambda-build-${{ github.run_number }}
+          delete-branch: true
+          title: "feat: Update WAF Lambda packages from upstream ${{ inputs.upstream_ref }}"
+          body: |
+            ## Automated Lambda Package Build
+
+            This PR updates the WAF Lambda zip files built from upstream source.
+
+            ### Build Information
+            | Field | Value |
+            |-------|-------|
+            | Upstream Repository | `${{ env.UPSTREAM_REPO }}` |
+            | Upstream Reference | `${{ inputs.upstream_ref }}` |
+            | Python Runtime | `${{ env.PYTHON_VERSION }}` |
+            | Build Number | `${{ github.run_number }}` |
+
+            ### Version Information
+            | Field | Value |
+            |-------|-------|
+            | Current Version | `${{ steps.version.outputs.current }}` |
+            | Requested Bump | `${{ inputs.version_bump }}` |
+            | **Suggested Next Version** | `${{ steps.version.outputs.next }}` |
+
+            > **Action Required**: If version bump was requested, create tag `${{ steps.version.outputs.next }}` after merging.
+
+            ### Packages Updated
+            - `lambda/log_parser.zip`
+            - `lambda/reputation_lists_parser.zip`
+
+            ### Verification Checklist
+            - [ ] Review zip file sizes are reasonable
+            - [ ] Run `terraform plan` to verify no breaking changes
+            - [ ] Test in staging environment (optional)
+            - [ ] Create release tag after merge (if applicable)
+
+            ### How to Create Release Tag (after merge)
+            ```bash
+            git checkout master && git pull
+            git tag -a "${{ steps.version.outputs.next }}" -m "Release ${{ steps.version.outputs.next }}"
+            git push origin "${{ steps.version.outputs.next }}"
+            ```
+
+            ---
+            *Automated by GitHub Actions workflow*
+          labels: |
+            automated
+            lambda
+            security

@@ -1,0 +1,13 @@
+FROM public.ecr.aws/lambda/python:3.13
+
+# Install build tools
+RUN dnf install -y zip unzip bc && \
+    pip install --upgrade pip && \
+    pip install poetry pip-audit
+
+WORKDIR /build
+
+COPY build-lambda.sh /build/
+RUN chmod +x /build/build-lambda.sh
+
+ENTRYPOINT ["/build/build-lambda.sh"]
