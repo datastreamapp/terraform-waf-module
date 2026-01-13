@@ -299,4 +299,12 @@ These items are intentionally accepted as trade-offs:
 | Lambda no concurrency limit | LOW | Self-limiting via CloudWatch Events trigger |
 | Dockerfile no HEALTHCHECK | INFO | Build container only, not long-running |
 
-See `docs/TESTING.md` Section 4.4 for full details.
+### Expected Warnings (Safe to Ignore)
+
+| Warning | Source | Reason |
+|---------|--------|--------|
+| `data.aws_region.current.name` deprecated | Terraform | Pre-existing, does not affect functionality |
+| `dulwich requires urllib3>=2.2.2` | pip install | Upstream dependency conflict, doesn't affect runtime |
+| `Running pip as root user` | pip install | Expected in Docker build container |
+
+See `docs/TESTING.md` Section 4.4 and 4.5 for full details.

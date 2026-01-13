@@ -184,6 +184,16 @@ docker run --rm -v $(pwd):/data -t bridgecrew/checkov:latest -d /data --quiet --
 | CKV_AWS_117 | LOW | Lambda VPC - not required for this use case |
 | CKV_DOCKER_2/3 | INFO | Build container only, not production |
 
+### 4.5 Expected Warnings (Safe to Ignore)
+
+These warnings appear during tests but are expected and don't indicate problems:
+
+| Warning | Source | Reason |
+|---------|--------|--------|
+| `data.aws_region.current.name` deprecated | Terraform validate | Pre-existing in module, uses deprecated AWS provider attribute. Does not affect functionality. |
+| `dulwich requires urllib3>=2.2.2` | Lambda pip install | Upstream dependency conflict in build container. Does not affect Lambda runtime. |
+| `Running pip as root user` | Lambda pip install | Expected in Docker build container. Isolated environment, not a security risk. |
+
 ---
 
 ## 5. Lambda Build Tests (Docker)
