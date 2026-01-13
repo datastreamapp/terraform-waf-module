@@ -237,3 +237,68 @@ terraform-waf-module/
 ├── TODOLIST.md                        # Implementation tasks
 └── README.md                          # Project documentation
 ```
+
+---
+
+## Code References
+
+This section provides traceability for all diagram elements to their source code locations.
+
+### System Overview Diagram
+
+| Diagram Element | File:Line | Evidence |
+|-----------------|-----------|----------|
+| log_parser triggered by SNS | `lambda.log-parser.tf:287-291` | `aws_sns_topic_subscription.log-parser` |
+| S3 notifications to SNS | `lambda.log-parser.tf:227-257` | `aws_s3_bucket_notification.log-parser` |
+| S3 prefixes: CloudFront, ALB, WAF | `lambda.log-parser.tf:236,245,254` | `filter_prefix` for each log type |
+| reputation_lists_parser hourly trigger | `lambda.reputation-list.tf:131-136` | `schedule_expression = "rate(1 hour)"` |
+| log_parser updates HTTP Flood IP Sets | `lambda.log-parser.tf:153-154` | `HTTPFloodSetIPV4.arn`, `HTTPFloodSetIPV6.arn` |
+| log_parser updates Scanners/Probes IP Sets | `lambda.log-parser.tf:106-107` | `ScannersProbesSetIPV4.arn`, `ScannersProbesSetIPV6.arn` |
+| reputation_lists_parser updates Reputation IP Sets | `lambda.reputation-list.tf:50-51` | `IPReputationListsSetIPV4.arn`, `IPReputationListsSetIPV6.arn` |
+| Python 3.13 runtime | `lambda.log-parser.tf:176`, `lambda.reputation-list.tf:94` | `runtime = "python3.13"` |
+
+### Reputation Lists - External URLs
+
+| URL | File:Line |
+|-----|-----------|
+| `https://www.spamhaus.org/drop/drop.txt` | `lambda.reputation-list.tf:119` |
+| `https://www.spamhaus.org/drop/edrop.txt` | `lambda.reputation-list.tf:119` |
+| `https://check.torproject.org/exit-addresses` | `lambda.reputation-list.tf:119` |
+| `https://rules.emergingthreats.net/fwrules/emerging-Block-IPs.txt` | `lambda.reputation-list.tf:119` |
+
+### Build Process Diagram
+
+| Step | File:Line | Command |
+|------|-----------|---------|
+| 1. Poetry export | `scripts/build-lambda.sh:79` | `poetry export --without dev -f requirements.txt` |
+| 2. pip install | `scripts/build-lambda.sh:84` | `pip install -r ... -t "${BUILD_DIR}"` |
+| 3. Copy handler files | `scripts/build-lambda.sh:94` | `cp -r "${SOURCE_DIR}"/*.py` |
+| 4. Copy shared libs | `scripts/build-lambda.sh:105` | `cp "${LIB_DIR}"/*.py "${BUILD_DIR}/lib/"` |
+| 5. Clean __pycache__ | `scripts/build-lambda.sh:123,126` | `find ... -name "__pycache__"` |
+| 6. Create zip | `scripts/build-lambda.sh:136` | `zip -r -q "${OUTPUT_DIR}/${ZIP_NAME}"` |
+
+### Validation Tests
+
+| Test | File:Line | Check |
+|------|-----------|-------|
+| Test 1: Zip exists & not empty | `scripts/build-lambda.sh:150` | `-f ... && -s ...` |
+| Test 2: Handler in zip | `scripts/build-lambda.sh:158` | `unzip -l ... \| grep -q "${HANDLER}"` |
+| Test 3: Size < 50MB | `scripts/build-lambda.sh:166` | `stat` + size comparison |
+| Test 4: Required libs | `scripts/build-lambda.sh:177-178` | Loop over `REQUIRED_LIBS` |
+| Test 5: Zip integrity | `scripts/build-lambda.sh:190` | `unzip -t` |
+| Test 6: No __pycache__ | `scripts/build-lambda.sh:198` | `grep -q "__pycache__"` (expect fail) |
+| Test 7: No .pyc files | `scripts/build-lambda.sh:206` | `grep -q "\.pyc"` (expect fail) |
+| Test 8: Import validation | `scripts/build-lambda.sh:224` | `python3 -c "import ..."` |
+
+### CI/CD Pipeline Diagram
+
+| Step | File:Line | Evidence |
+|------|-----------|----------|
+| workflow_dispatch trigger | `.github/workflows/build-lambda-packages.yml:4` | `on: workflow_dispatch:` |
+| Checkout this repo | `.github/workflows/build-lambda-packages.yml:39-43` | `uses: actions/checkout@v4` |
+| Checkout upstream | `.github/workflows/build-lambda-packages.yml:73-82` | `repository: aws-solutions/...` |
+| Build Docker image | `.github/workflows/build-lambda-packages.yml:98-100` | `docker build -t lambda-builder` |
+| Build log_parser.zip | `.github/workflows/build-lambda-packages.yml:102-108` | `docker run ... log_parser` |
+| Build reputation_lists_parser.zip | `.github/workflows/build-lambda-packages.yml:110-116` | `docker run ... reputation_lists_parser` |
+| pip-audit security scan | `.github/workflows/build-lambda-packages.yml:118-130` | `pip-audit -r ...` |
+| Create PR | `.github/workflows/build-lambda-packages.yml:148-206` | `peter-evans/create-pull-request@v6` |
