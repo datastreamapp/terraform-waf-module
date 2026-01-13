@@ -1,15 +1,14 @@
 variable "name" {
   description = "unique prefix for names. alpha numeric only. ie uatAppname"
+  type        = string
   default     = ""
 }
 
 variable "scope" {
-  type    = string // CLOUDFRONT, REGIONAL
+  type = string // CLOUDFRONT, REGIONAL
 }
 
-variable "defaultAction" {
-  default = "block"
-}
+# Note: defaultAction variable removed - was unused (see main.tf line 15 TODO comment)
 
 variable "requestThreshold" {
   description = "If you chose yes for the Activate HTTP Flood Protection parameter, enter the maximum acceptable requests per FIVE-minute period per IP address. Please note that AWS WAF rate based rule requires values greather than 2,000 (if you chose Lambda/Athena log parser options, you can use any value greather than zero). If you chose to deactivate this protection, ignore this parameter. Default to `2000`, min allowed: `2000`"
@@ -19,8 +18,8 @@ variable "requestThreshold" {
 
 variable "errorThreshold" {
   description = "If you chose yes for the Activate Scanners & Probes Protection parameter, enter the maximum acceptable bad requests per minute per IP. If you chose to deactivate this protection protection, ignore this parameter."
-  type = number
-  default = 50
+  type        = number
+  default     = 50
 }
 
 variable "blockPeriod" {
@@ -30,7 +29,7 @@ variable "blockPeriod" {
 }
 
 variable "excluded_rules" {
-  type = list(string)
+  type    = list(string)
   default = []
 }
 
@@ -40,60 +39,58 @@ variable "excluded_rules" {
 //}
 
 variable "uploadToS3Activated" {
-  type = bool
+  type    = bool
   default = false
 }
 
 variable "uploadToS3Path" {
-  type = string
+  type        = string
   description = "path that upload will take place"
-  default = ""
+  default     = ""
 }
 
 variable "uploadToS3Method" {
-  type = string
+  type        = string
   description = "method that upload will use"
-  default = "PUT"
+  default     = "PUT"
 }
 
 variable "whitelistActivated" {
-  type = bool
+  type    = bool
   default = false
 }
 
 variable "blacklistProtectionActivated" {
-  type = bool
+  type    = bool
   default = true
 }
 
 variable "httpFloodProtectionLogParserActivated" {
-  type = bool
+  type    = bool
   default = true
 }
 
 variable "scannersProbesProtectionActivated" {
-  type = bool
+  type    = bool
   default = true
 }
 
 variable "reputationListsProtectionActivated" {
-  type = bool
+  type    = bool
   default = true
 }
 
 variable "badBotProtectionActivated" {
-  type = bool
+  type    = bool
   default = true
 }
 
-variable "SqlInjectionProtectionSensitivityLevelParam" {
-  type = string
-  description = "Sensitivity Level for SQL Injection Protection. LOW or HIGH"
-  default = "LOW"
-}
+# Note: SqlInjectionProtectionSensitivityLevelParam removed - re-add when implementing
+# sensitivity_level in main.tf sqli_match_statement blocks (currently commented out)
 
 variable "logging_bucket" {
-  description = ""
+  description = "S3 bucket for WAF logs"
+  type        = string
   default     = ""
 }
 
@@ -106,11 +103,11 @@ variable "dead_letter_policy_arn" {
 }
 
 variable "kms_master_key_id" {
-  type = string
+  type    = string
   default = null
 }
 variable "kms_master_key_arn" {
-  type = string
+  type    = string
   default = null
 }
 

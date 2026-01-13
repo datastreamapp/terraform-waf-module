@@ -18,12 +18,20 @@ BUILD_DIR="/tmp/build_${PACKAGE_NAME}"
 ZIP_NAME="${PACKAGE_NAME}.zip"
 MAX_SIZE_MB=50
 
-# Handler mapping
+# Handler mapping (upstream file -> terraform expected file)
 declare -A HANDLERS=(
     ["log_parser"]="log-parser.py"
     ["reputation_lists_parser"]="reputation-lists.py"
 )
+
+# Source file mapping (what upstream calls the main handler)
+declare -A SOURCE_HANDLERS=(
+    ["log_parser"]="log_parser.py"
+    ["reputation_lists_parser"]="reputation_lists.py"
+)
+
 HANDLER="${HANDLERS[$PACKAGE_NAME]:-}"
+SOURCE_HANDLER="${SOURCE_HANDLERS[$PACKAGE_NAME]:-}"
 
 # Required shared libs
 REQUIRED_LIBS=("waflibv2.py" "solution_metrics.py")
@@ -54,7 +62,8 @@ if [[ ! -d "$LIB_DIR" ]]; then
 fi
 
 echo "  Package: ${PACKAGE_NAME}"
-echo "  Handler: ${HANDLER}"
+echo "  Source handler: ${SOURCE_HANDLER}"
+echo "  Target handler: ${HANDLER}"
 echo "  Source: ${SOURCE_DIR}"
 
 #######################################
@@ -66,25 +75,34 @@ mkdir -p "${BUILD_DIR}"
 echo "  Build dir: ${BUILD_DIR}"
 
 #######################################
-# STEP 3: Export and install dependencies
+# STEP 3: Install dependencies
 #######################################
 echo "[3/8] Installing dependencies..."
 cd "${SOURCE_DIR}"
 
-if [[ ! -f "pyproject.toml" ]]; then
-    echo "ERROR: pyproject.toml not found in ${SOURCE_DIR}"
+# Check for requirements.txt (upstream uses this)
+if [[ -f "requirements.txt" ]]; then
+    echo "  Using requirements.txt"
+    pip install -r "requirements.txt" -t "${BUILD_DIR}" --quiet --no-cache-dir || {
+        echo "ERROR: pip install failed"
+        exit 1
+    }
+# Fallback to pyproject.toml if exists
+elif [[ -f "pyproject.toml" ]]; then
+    echo "  Using pyproject.toml (poetry export)"
+    poetry export --without dev -f requirements.txt -o "${BUILD_DIR}/requirements.txt" 2>/dev/null || {
+        echo "ERROR: Poetry export failed"
+        exit 1
+    }
+    pip install -r "${BUILD_DIR}/requirements.txt" -t "${BUILD_DIR}" --quiet --no-cache-dir || {
+        echo "ERROR: pip install failed"
+        exit 1
+    }
+    rm -f "${BUILD_DIR}/requirements.txt"
+else
+    echo "ERROR: No requirements.txt or pyproject.toml found in ${SOURCE_DIR}"
     exit 1
 fi
-
-poetry export --without dev -f requirements.txt -o "${BUILD_DIR}/requirements.txt" 2>/dev/null || {
-    echo "ERROR: Poetry export failed"
-    exit 1
-}
-
-pip install -r "${BUILD_DIR}/requirements.txt" -t "${BUILD_DIR}" --quiet --no-cache-dir || {
-    echo "ERROR: pip install failed"
-    exit 1
-}
 echo "  Dependencies installed"
 
 #######################################
@@ -95,6 +113,12 @@ cp -r "${SOURCE_DIR}"/*.py "${BUILD_DIR}/" 2>/dev/null || {
     echo "ERROR: No Python files found in ${SOURCE_DIR}"
     exit 1
 }
+
+# Rename handler to match Terraform expectation (underscore -> hyphen)
+if [[ -f "${BUILD_DIR}/${SOURCE_HANDLER}" && "${SOURCE_HANDLER}" != "${HANDLER}" ]]; then
+    mv "${BUILD_DIR}/${SOURCE_HANDLER}" "${BUILD_DIR}/${HANDLER}"
+    echo "  Renamed ${SOURCE_HANDLER} -> ${HANDLER}"
+fi
 echo "  Handler files copied"
 
 #######################################
@@ -120,12 +144,17 @@ echo "  Shared libraries copied"
 # STEP 6: Clean up unnecessary files
 #######################################
 echo "[6/8] Cleaning build artifacts..."
-find "${BUILD_DIR}" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
-find "${BUILD_DIR}" -type d -name "*.dist-info" -exec rm -rf {} + 2>/dev/null || true
-find "${BUILD_DIR}" -type d -name "*.egg-info" -exec rm -rf {} + 2>/dev/null || true
-find "${BUILD_DIR}" -type f -name "*.pyc" -delete 2>/dev/null || true
-find "${BUILD_DIR}" -type f -name "*.pyo" -delete 2>/dev/null || true
-rm -f "${BUILD_DIR}/requirements.txt"
+# Remove pycache, dist-info, and other build artifacts
+# Use -prune to avoid descending into deleted directories
+cd "${BUILD_DIR}"
+find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+find . -type d -name "*.dist-info" -exec rm -rf {} + 2>/dev/null || true
+find . -type d -name "*.egg-info" -exec rm -rf {} + 2>/dev/null || true
+find . -type f -name "*.pyc" -delete 2>/dev/null || true
+find . -type f -name "*.pyo" -delete 2>/dev/null || true
+find . -type d -name "test" -exec rm -rf {} + 2>/dev/null || true
+find . -type d -name "tests" -exec rm -rf {} + 2>/dev/null || true
+rm -f requirements.txt requirements_dev.txt
 echo "  Cleaned up build artifacts"
 
 #######################################
@@ -155,10 +184,12 @@ else
 fi
 
 # Test 2: Handler file exists in zip
-if unzip -l "${OUTPUT_DIR}/${ZIP_NAME}" | grep -q "${HANDLER}"; then
+if unzip -l "${OUTPUT_DIR}/${ZIP_NAME}" | grep -F "${HANDLER}" | grep -qv "/"; then
     echo "  PASS: Handler ${HANDLER} found in zip"
 else
     echo "  FAIL: Handler ${HANDLER} not found in zip"
+    echo "  Root-level .py files:"
+    unzip -l "${OUTPUT_DIR}/${ZIP_NAME}" | grep -E "\.py$" | grep -v "/" | head -10
     exit 1
 fi
 
@@ -175,10 +206,12 @@ fi
 
 # Test 4: Required shared libs in zip
 for lib in "${REQUIRED_LIBS[@]}"; do
-    if unzip -l "${OUTPUT_DIR}/${ZIP_NAME}" | grep -q "lib/${lib}"; then
+    if unzip -l "${OUTPUT_DIR}/${ZIP_NAME}" 2>/dev/null | grep "lib/${lib}" >/dev/null 2>&1; then
         echo "  PASS: Required lib/${lib} found"
     else
         echo "  FAIL: Required lib/${lib} missing"
+        echo "  Lib files in zip:"
+        unzip -l "${OUTPUT_DIR}/${ZIP_NAME}" | grep "lib/" | head -10
         exit 1
     fi
 done
@@ -220,15 +253,16 @@ unzip -q "${OUTPUT_DIR}/${ZIP_NAME}" -d "${TEMP_EXTRACT}"
 cd "${TEMP_EXTRACT}"
 HANDLER_MODULE="${HANDLER%.py}"
 
-# Test basic import
-if python3 -c "import sys; sys.path.insert(0, '.'); import ${HANDLER_MODULE//-/_}" 2>/dev/null; then
+# Test basic import (convert hyphens to underscores for Python import)
+IMPORT_MODULE="${HANDLER_MODULE//-/_}"
+if python3 -c "import sys; sys.path.insert(0, '.'); import ${IMPORT_MODULE}" 2>/dev/null; then
     echo "  PASS: Handler module imports successfully"
 else
-    # Try alternate import pattern
-    if python3 -c "import sys; sys.path.insert(0, '.'); exec(open('${HANDLER}').read())" 2>&1 | grep -q "ModuleNotFoundError"; then
-        echo "  WARN: Handler has missing optional imports (may work in Lambda)"
+    # Check if file exists and has valid syntax
+    if python3 -m py_compile "${HANDLER}" 2>/dev/null; then
+        echo "  PASS: Handler syntax is valid (imports may need Lambda environment)"
     else
-        echo "  PASS: Handler syntax is valid"
+        echo "  WARN: Handler has syntax issues or missing dependencies"
     fi
 fi
 

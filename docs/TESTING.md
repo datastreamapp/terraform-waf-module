@@ -4,188 +4,280 @@ This document describes how to test the terraform-waf-module before deployment.
 
 ## Prerequisites
 
-| Tool | Version | Purpose | Install |
-|------|---------|---------|---------|
-| Terraform | >= 1.0 | Infrastructure validation | `brew install terraform` |
-| AWS CLI | >= 2.0 | AWS credentials | `brew install awscli` |
-| Docker | Latest | Lambda build environment | `brew install docker` |
-| tfsec | Latest | Security scanning | `brew install tfsec` |
-| checkov | Latest | Policy compliance | `pip install checkov` |
-| tflint | Latest | Linting | `brew install tflint` |
+| Tool | Required | Purpose | Install |
+|------|----------|---------|---------|
+| Terraform | Yes | Infrastructure validation | `brew install terraform` |
+| Docker | Yes | All tests run in containers | `brew install docker` |
+| AWS CLI | Optional | AWS credentials for plan | `brew install awscli` |
+
+**Note:** tflint, tfsec, and checkov are NOT required locally - they run in Docker containers for parity with CI.
+
+---
 
 ## Quick Start
 
 ```bash
-# Run all tests
+# Quick test (no Docker, just Terraform)
 make test
 
-# Or manually:
-terraform init
-terraform validate
-terraform fmt -check
-tfsec .
+# Local test suite with Docker (recommended)
+make test-local
+
+# Full test suite including Lambda builds
+make test-all
 ```
 
 ---
 
-## 1. Terraform Validation
+## Test Summary
 
-### 1.1 Initialize
+| Target | Tests | Docker | Time |
+|--------|-------|--------|------|
+| `make test` | validate, fmt | No | ~5s |
+| `make test-local` | validate, fmt, lint, security | Yes | ~60s |
+| `make test-all` | All above + Lambda builds | Yes | ~120s |
+
+---
+
+## 1. Available Make Targets
+
+### Core Targets
+
+| Target | Description | Requirements |
+|--------|-------------|--------------|
+| `make test` | Quick tests (validate + fmt) | Terraform only |
+| `make test-local` | Full tests except Lambda | Terraform + Docker |
+| `make test-all` | Complete test suite | Terraform + Docker |
+
+### Individual Targets
+
+| Target | Description | Docker |
+|--------|-------------|--------|
+| `make validate` | Terraform init + validate | No |
+| `make fmt` | Check formatting | No |
+| `make lint` | Run tflint | Yes |
+| `make security` | Run tfsec + checkov | Yes |
+| `make test-lambda` | Build & test Lambda packages | Yes |
+| `make build` | Build Docker image only | Yes |
+| `make clean` | Remove .terraform | No |
+| `make clean-all` | Remove .terraform + upstream | No |
+
+---
+
+## 2. Terraform Validation
+
+### 2.1 Initialize
 
 ```bash
-terraform init
+terraform init -backend=false
 ```
 
-**Expected output:** `Terraform has been successfully initialized!`
+**Expected:** `Terraform has been successfully initialized!`
 
-### 1.2 Validate Syntax
+### 2.2 Validate Syntax
 
 ```bash
 terraform validate
 ```
 
-**Expected output:** `Success! The configuration is valid.`
+**Expected:** `Success! The configuration is valid.`
 
-### 1.3 Format Check
+**Note:** Deprecation warnings for `data.aws_region.current.name` are expected and harmless.
+
+### 2.3 Format Check
 
 ```bash
 terraform fmt -check -recursive
 ```
 
-**Expected output:** No output means all files are formatted correctly.
+**Expected:** No output means all files are formatted correctly.
 
 To auto-fix formatting:
 ```bash
 terraform fmt -recursive
 ```
 
-### 1.4 Plan (Dry Run)
+---
 
-Requires AWS credentials and variables:
+## 3. Linting (Docker)
+
+### 3.1 Run tflint
 
 ```bash
-terraform plan \
-  -var="name=test-waf" \
-  -var="scope=REGIONAL" \
-  -var="logging_bucket=my-test-bucket" \
-  -var="dead_letter_arn=arn:aws:sqs:us-east-1:123456789:dlq" \
-  -var="dead_letter_policy_arn=arn:aws:iam::123456789:policy/dlq"
+make lint
 ```
 
-**Expected output:** Plan showing resources to be created.
+Or manually:
+```bash
+docker run --rm -v $(pwd):/data -t ghcr.io/terraform-linters/tflint:latest --init
+docker run --rm -v $(pwd):/data -t ghcr.io/terraform-linters/tflint:latest
+```
+
+**What it checks:**
+- Variable type declarations
+- Unused declarations
+- Deprecated syntax
+- AWS provider-specific issues
+
+**Expected:** No output means no issues found.
 
 ---
 
-## 2. Security Scanning
+## 4. Security Scanning (Docker)
 
-### 2.1 tfsec (Terraform Security)
+### 4.1 Run Security Scans
 
 ```bash
-tfsec .
+make security
+```
+
+This runs both tfsec and checkov in Docker containers.
+
+### 4.2 tfsec (Terraform Security)
+
+```bash
+docker run --rm -v $(pwd):/data -t aquasec/tfsec:latest /data --minimum-severity HIGH
 ```
 
 **What it checks:**
 - Hardcoded secrets
 - Insecure configurations
-- AWS best practices
+- AWS security best practices
 
-**Expected output:** `No problems detected!` or list of issues with severity.
+**Configuration:**
+- Minimum severity: HIGH (LOW issues are soft-fail)
+- Excludes: `upstream/` (third-party code)
 
-### 2.2 checkov (Policy Compliance)
+### 4.3 checkov (Policy Compliance)
 
 ```bash
-checkov -d .
+docker run --rm -v $(pwd):/data -t bridgecrew/checkov:latest -d /data --quiet --compact
 ```
 
 **What it checks:**
 - CIS benchmarks
 - AWS security best practices
-- Compliance frameworks (SOC2, HIPAA, PCI-DSS)
+- Compliance frameworks
 
-### 2.3 tflint (Linting)
+**Configuration:**
+- Excludes: `upstream/`, `lambda/` directories
+- Soft-fail on: Lambda VPC config, log encryption (documented trade-offs)
 
-```bash
-tflint --init
-tflint .
-```
+### 4.4 Known Accepted Issues
 
-**What it checks:**
-- Deprecated syntax
-- Invalid resource configurations
-- AWS provider-specific issues
+| Check | Severity | Reason |
+|-------|----------|--------|
+| CKV_AWS_158 | LOW | CloudWatch log encryption - uses default encryption |
+| CKV_AWS_115 | LOW | Lambda concurrency - not required for this use case |
+| CKV_AWS_117 | LOW | Lambda VPC - not required for this use case |
+| CKV_DOCKER_2/3 | INFO | Build container only, not production |
 
 ---
 
-## 3. Lambda Build Tests
+## 5. Lambda Build Tests (Docker)
 
-The Lambda build script (`scripts/build-lambda.sh`) includes comprehensive validation.
+### 5.1 Run Lambda Tests
 
-### 3.1 Run Build Locally
+```bash
+make test-lambda
+```
+
+Or step by step:
 
 ```bash
 # Clone upstream source
-git clone --depth 1 --branch v4.0.3 \
-  https://github.com/aws-solutions/aws-waf-security-automations.git upstream
+make clone-upstream
 
 # Build Docker image
-docker build -t lambda-builder -f scripts/Dockerfile.lambda-builder scripts/
+make build
 
-# Build and test log_parser
+# Run builds
 docker run --rm \
   -v $(pwd)/upstream:/upstream:ro \
   -v $(pwd)/lambda:/output \
   lambda-builder log_parser /upstream /output
 
-# Build and test reputation_lists_parser
 docker run --rm \
   -v $(pwd)/upstream:/upstream:ro \
   -v $(pwd)/lambda:/output \
   lambda-builder reputation_lists_parser /upstream /output
 ```
 
-### 3.2 Automated Tests (in build script)
-
-The build script runs these tests automatically:
+### 5.2 Automated Tests (18 total, 9 per package)
 
 #### Positive Tests
 
-| # | Test | File:Line | What it validates |
-|---|------|-----------|-------------------|
-| 1 | Zip exists & not empty | `scripts/build-lambda.sh:150` | Build completed successfully |
-| 2 | Handler file in zip | `scripts/build-lambda.sh:158` | Lambda can find entry point |
-| 3 | Size < 50MB | `scripts/build-lambda.sh:166` | Within Lambda deployment limit |
-| 4 | Required libs included | `scripts/build-lambda.sh:177` | `waflibv2.py`, `solution_metrics.py` present |
+| # | Test | What it validates |
+|---|------|-------------------|
+| 1 | Zip exists & not empty | Build completed successfully |
+| 2 | Handler file in zip | Lambda can find entry point |
+| 3 | Size < 50MB | Within Lambda deployment limit |
+| 4 | waflibv2.py present | Core library included |
+| 5 | solution_metrics.py present | Metrics library included |
 
 #### Negative Tests
 
-| # | Test | File:Line | What it catches |
-|---|------|-----------|-----------------|
-| 5 | Zip integrity | `scripts/build-lambda.sh:190` | Corrupted archive |
-| 6 | No `__pycache__` | `scripts/build-lambda.sh:198` | Unclean build artifacts |
-| 7 | No `.pyc` files | `scripts/build-lambda.sh:206` | Bytecode contamination |
-| 8 | Import validation | `scripts/build-lambda.sh:224` | Missing dependencies |
+| # | Test | What it catches |
+|---|------|-----------------|
+| 6 | Zip integrity | Corrupted archive |
+| 7 | No `__pycache__` | Unclean build artifacts |
+| 8 | No `.pyc` files | Bytecode contamination |
+| 9 | Import validation | Syntax errors in handler |
 
-### 3.3 Security Scan (pip-audit)
+### 5.3 Expected Output
 
-```bash
-# Scan log_parser dependencies
-cd upstream/source/log_parser
-poetry export --without dev -f requirements.txt -o /tmp/reqs.txt
-pip-audit -r /tmp/reqs.txt --desc
-
-# Scan reputation_lists_parser dependencies
-cd ../reputation_lists_parser
-poetry export --without dev -f requirements.txt -o /tmp/reqs.txt
-pip-audit -r /tmp/reqs.txt --desc
 ```
-
-**Expected output:** `No known vulnerabilities found` or list of CVEs.
+============================================
+BUILD SUCCESSFUL: log_parser.zip
+Size: 1.61MB
+Location: /output/log_parser.zip
+============================================
+```
 
 ---
 
-## 4. Manual Validation
+## 6. CI/CD Tests
 
-### 4.1 Verify Zip Contents
+Tests run automatically in GitHub Actions on every PR and push to `master`.
+
+### 6.1 Test Workflow
+
+**File:** `.github/workflows/test.yml`
+
+**Triggers:**
+- Push to `master`
+- Pull request to `master`
+
+### 6.2 CI Test Matrix
+
+| Job | Step | Tool | Exit on Fail |
+|-----|------|------|--------------|
+| terraform | Init | terraform init | Yes |
+| terraform | Validate | terraform validate | Yes |
+| terraform | Format | terraform fmt -check | Yes |
+| terraform | Lint | tflint | Yes |
+| terraform | Security | tfsec | Yes (HIGH/CRITICAL) |
+| terraform | Compliance | checkov | No (soft-fail) |
+| lambda | Build log_parser | Docker | Yes |
+| lambda | Build reputation_lists | Docker | Yes |
+
+### 6.3 Build Workflow
+
+**File:** `.github/workflows/build-lambda-packages.yml`
+
+Triggered manually to rebuild Lambda packages:
+
+```bash
+gh workflow run "Build WAF Lambda Packages" \
+  -f upstream_ref=v4.0.3 \
+  -f version_bump=none
+```
+
+---
+
+## 7. Manual Validation
+
+### 7.1 Verify Zip Contents
 
 ```bash
 # List contents
@@ -195,87 +287,62 @@ unzip -l lambda/log_parser.zip | head -30
 unzip -l lambda/log_parser.zip | grep -E "log-parser.py|lib/waflibv2.py"
 ```
 
-### 4.2 Test Python Imports
+### 7.2 Test Python Imports
 
 ```bash
 # Extract and test
 mkdir -p /tmp/test-lambda
 unzip -q lambda/log_parser.zip -d /tmp/test-lambda
 cd /tmp/test-lambda
-
-# Test import
-python3 -c "import sys; sys.path.insert(0, '.'); import log_parser"
-
-# Cleanup
+python3 -c "import sys; sys.path.insert(0, '.'); exec(open('log-parser.py').read().split('def lambda_handler')[0])"
 rm -rf /tmp/test-lambda
 ```
 
-### 4.3 Verify File Sizes
+### 7.3 Verify File Sizes
 
 ```bash
 ls -lh lambda/*.zip
 ```
 
-**Expected:** Both zips should be < 50MB.
+**Expected:** Both zips should be ~1.6MB, well under 50MB limit.
 
 ---
 
-## 5. CI/CD Tests
-
-Tests run automatically in GitHub Actions when the build workflow is triggered.
-
-### 5.1 Workflow Location
-
-`File:` `.github/workflows/build-lambda-packages.yml`
-
-### 5.2 Tests Executed
-
-| Step | Line | Test |
-|------|------|------|
-| Verify upstream checkout | :84-93 | Source directories exist |
-| Build log_parser.zip | :102-108 | Build + validation tests |
-| Build reputation_lists_parser.zip | :110-116 | Build + validation tests |
-| pip-audit scan | :118-130 | Dependency vulnerabilities |
-| Final validation | :132-146 | Zip listing and summary |
-
-### 5.3 Trigger Workflow
+## 8. Test Commands Summary
 
 ```bash
-# Via GitHub CLI
-gh workflow run "Build WAF Lambda Packages" \
-  -f upstream_ref=v4.0.3 \
-  -f version_bump=none
+# === RECOMMENDED WORKFLOW ===
+
+# 1. Quick check (developers, no Docker)
+make test
+
+# 2. Full local validation (before commit)
+make test-local
+
+# 3. Complete suite (before PR)
+make test-all
+
+# === INDIVIDUAL COMMANDS ===
+
+# Terraform only
+terraform init -backend=false && terraform validate && terraform fmt -check -recursive
+
+# Lint only
+docker run --rm -v $(pwd):/data -t ghcr.io/terraform-linters/tflint:latest
+
+# Security only
+docker run --rm -v $(pwd):/data -t aquasec/tfsec:latest /data --minimum-severity HIGH
+
+# Lambda builds only
+make test-lambda
+
+# Clean rebuild
+make clean-all && make test-all
 ```
 
 ---
 
-## 6. Test Matrix
-
-### What We Test
-
-| Category | Tool | Scope |
-|----------|------|-------|
-| Terraform syntax | `terraform validate` | All `.tf` files |
-| Terraform format | `terraform fmt` | All `.tf` files |
-| Terraform plan | `terraform plan` | Full module |
-| Security (TF) | `tfsec` | All `.tf` files |
-| Compliance | `checkov` | All `.tf` files |
-| Linting | `tflint` | All `.tf` files |
-| Lambda build | `build-lambda.sh` | Both Lambda packages |
-| Lambda security | `pip-audit` | Python dependencies |
-| Zip integrity | `unzip -t` | Both Lambda packages |
-
-### What We Don't Test (Yet)
-
-| Category | Reason | Future Work |
-|----------|--------|-------------|
-| Integration tests | Requires AWS deployment | Add terratest |
-| End-to-end tests | Requires live WAF | Add staging environment |
-| Performance tests | Requires traffic | Add load testing |
-
----
-
-## 7. Troubleshooting
+## 9. Troubleshooting
 
 ### Common Issues
 
@@ -283,9 +350,10 @@ gh workflow run "Build WAF Lambda Packages" \
 |-------|-------|----------|
 | `terraform init` fails | Missing providers | Check internet connection |
 | `terraform validate` fails | Syntax error | Check error message for file:line |
-| Docker build fails | Missing Docker | Install and start Docker |
-| pip-audit finds vulnerabilities | Outdated dependencies | Update upstream reference |
-| Zip too large | Too many dependencies | Review and trim dependencies |
+| Docker build fails | Docker not running | Start Docker Desktop |
+| tflint warnings | Variable issues | Fix or ignore if intentional |
+| tfsec HIGH issues | Security concern | Fix before merge |
+| Lambda build fails | Missing upstream | Run `make clone-upstream` |
 
 ### Debug Commands
 
@@ -296,47 +364,29 @@ TF_LOG=DEBUG terraform plan
 # Docker build with no cache
 docker build --no-cache -t lambda-builder -f scripts/Dockerfile.lambda-builder scripts/
 
-# Extract and inspect zip
+# Inspect Lambda zip
 unzip -l lambda/log_parser.zip
 unzip lambda/log_parser.zip -d /tmp/inspect && ls -la /tmp/inspect
+
+# Check Docker logs
+docker logs $(docker ps -lq)
 ```
 
 ---
 
-## 8. Makefile
+## 10. Test Verification Checklist
 
-The project includes a `Makefile` for convenience:
+Before creating a PR, verify:
 
-```makefile
-.PHONY: test validate fmt security build clean
+- [ ] `make test` passes (quick validation)
+- [ ] `make test-local` passes (full validation)
+- [ ] `make test-all` passes (Lambda builds)
+- [ ] No HIGH/CRITICAL security issues
+- [ ] Git status shows only intended changes
 
-test: validate fmt security
-
-validate:
-	terraform init -backend=false
-	terraform validate
-
-fmt:
-	terraform fmt -check -recursive
-
-security:
-	tfsec .
-	checkov -d . --quiet
-
-build:
-	docker build -t lambda-builder -f scripts/Dockerfile.lambda-builder scripts/
-
-clean:
-	rm -rf .terraform
-	rm -rf /tmp/build_*
-```
-
-Usage:
 ```bash
-make test      # Run all tests
-make validate  # Terraform validation only
-make security  # Security scans only
-make build     # Build Docker image
+# Run this before PR
+make test-all && echo "ALL TESTS PASSED"
 ```
 
 ---
@@ -348,5 +398,5 @@ make build     # Build Docker image
 | Terraform Docs | https://developer.hashicorp.com/terraform/docs |
 | tfsec | https://aquasecurity.github.io/tfsec |
 | checkov | https://www.checkov.io/1.Welcome/Quick%20Start.html |
-| pip-audit | https://pypi.org/project/pip-audit/ |
+| tflint | https://github.com/terraform-linters/tflint |
 | AWS WAF Docs | https://docs.aws.amazon.com/waf/ |

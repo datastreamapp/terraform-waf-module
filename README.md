@@ -52,11 +52,12 @@ flowchart LR
 module "waf" {
   source = "git@github.com:datastreamapp/terraform-waf-module?ref=v3.0.0"
 
-  scope         = "REGIONAL"  # or "CLOUDFRONT"
-  name          = "my-app"
-  defaultAction = "ALLOW"
-
+  scope          = "REGIONAL"  # or "CLOUDFRONT"
+  name           = "my-app"
   logging_bucket = "my-app-waf-logs"
+
+  dead_letter_arn        = aws_sqs_queue.dlq.arn
+  dead_letter_policy_arn = aws_iam_policy.dlq.arn
 }
 ```
 
