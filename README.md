@@ -46,6 +46,52 @@ flowchart LR
 | **Reputation Lists** | Integration with external IP blocklists |
 | **Multi-Scope** | Works with CloudFront (edge) and regional resources |
 
+## Prerequisites
+
+Before using this module, you must create:
+
+### 1. S3 Logging Bucket
+
+```hcl
+resource "aws_s3_bucket" "waf_logs" {
+  bucket = "my-app-waf-logs"
+}
+```
+
+### 2. Dead Letter Queue (Required for Lambda Error Handling)
+
+```hcl
+# SQS Queue for failed Lambda invocations
+resource "aws_sqs_queue" "waf_dlq" {
+  name = "my-app-waf-dlq"
+
+  # Optional: encrypt with KMS
+  # kms_master_key_id = aws_kms_key.main.id
+}
+
+# IAM Policy allowing Lambda to send to DLQ
+resource "aws_iam_policy" "waf_dlq" {
+  name = "my-app-waf-dlq-policy"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["sqs:SendMessage"]
+      Resource = [aws_sqs_queue.waf_dlq.arn]
+    }]
+  })
+}
+```
+
+### 3. KMS Key (Optional but Recommended)
+
+```hcl
+resource "aws_kms_key" "waf" {
+  description = "KMS key for WAF encryption"
+}
+```
+
 ## Quick Start
 
 ```hcl
@@ -54,10 +100,14 @@ module "waf" {
 
   scope          = "REGIONAL"  # or "CLOUDFRONT"
   name           = "my-app"
-  logging_bucket = "my-app-waf-logs"
+  logging_bucket = aws_s3_bucket.waf_logs.id
 
-  dead_letter_arn        = aws_sqs_queue.dlq.arn
-  dead_letter_policy_arn = aws_iam_policy.dlq.arn
+  dead_letter_arn        = aws_sqs_queue.waf_dlq.arn
+  dead_letter_policy_arn = aws_iam_policy.waf_dlq.arn
+
+  # Optional KMS encryption
+  # kms_master_key_id  = aws_kms_key.waf.id
+  # kms_master_key_arn = aws_kms_key.waf.arn
 }
 ```
 

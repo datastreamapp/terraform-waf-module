@@ -37,6 +37,18 @@ make test-all
 | `make test-local` | validate, fmt, lint, security | Yes | ~60s |
 | `make test-all` | All above + Lambda builds | Yes | ~120s |
 
+### Important: validate vs plan
+
+| Command | Purpose | Requires AWS? | Requires Variables? |
+|---------|---------|---------------|---------------------|
+| `terraform validate` | Syntax & config check | No | No |
+| `terraform plan` | Pre-deployment preview | Yes | Yes (all required vars) |
+
+**Why this matters:**
+- `make test` and `make test-all` use `terraform validate` - no AWS credentials or variable values needed
+- `terraform plan` prompts for required variables like `dead_letter_arn` - run this in your deployment environment with a `.tfvars` file
+- For local development and CI, `make test-all` is sufficient
+
 ---
 
 ## 1. Available Make Targets
