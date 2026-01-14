@@ -415,6 +415,74 @@ make test-all && echo "ALL TESTS PASSED"
 
 ---
 
+## 11. Demo Commands
+
+### Inspect Lambda Packages
+
+```bash
+# List contents of a Lambda zip
+unzip -l lambda/log_parser.zip | head -20
+
+# Check package sizes
+ls -lh lambda/*.zip
+
+# Verify handler exists
+unzip -l lambda/log_parser.zip | grep "log-parser.py"
+
+# View handler code
+unzip -p lambda/log_parser.zip log-parser.py | head -50
+```
+
+### Manual Lambda Build
+
+```bash
+# Clone upstream source
+make clone-upstream
+
+# Build Docker image
+make build
+
+# Build specific package with verbose output
+docker run --rm \
+  -v $(pwd)/upstream:/upstream:ro \
+  -v $(pwd)/lambda:/output \
+  lambda-builder log_parser /upstream /output
+```
+
+### Trigger CI Workflows
+
+```bash
+# Re-run a failed workflow
+gh run rerun <run-id>
+
+# Trigger Lambda build workflow manually
+gh workflow run "Build WAF Lambda Packages" \
+  -f upstream_ref=v4.0.3 \
+  -f version_bump=patch
+
+# Watch workflow progress
+gh run watch
+```
+
+### Debug Commands
+
+```bash
+# Extract and inspect Lambda package
+mkdir -p /tmp/inspect
+unzip -q lambda/log_parser.zip -d /tmp/inspect
+ls -la /tmp/inspect
+ls -la /tmp/inspect/lib
+rm -rf /tmp/inspect
+
+# Test Python imports locally
+python3 -c "import sys; sys.path.insert(0, '/tmp/inspect'); import log_parser"
+
+# Check Docker build logs
+docker build --progress=plain -t lambda-builder -f scripts/Dockerfile.lambda-builder scripts/
+```
+
+---
+
 ## References
 
 | Resource | Link |
