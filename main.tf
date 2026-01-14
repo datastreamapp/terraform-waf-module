@@ -694,7 +694,7 @@ resource "aws_kinesis_firehose_delivery_stream" "main" {
     role_arn    = aws_iam_role.logging.arn
     bucket_arn  = "arn:aws:s3:::${local.logging_bucket}"
     prefix      = "AWSLogs/${local.account_id}/WAF/${local.region}/"
-    kms_key_arn = var.kms_master_key_arn  # Remove to use bucket's default encryption
+    kms_key_arn = var.kms_master_key_arn # Remove to use bucket's default encryption
 
     cloudwatch_logging_options {
       enabled         = true
@@ -711,18 +711,18 @@ resource "aws_kinesis_firehose_delivery_stream" "main" {
 
 data "aws_iam_policy_document" "logging_assume_role_policy" {
   statement {
-    effect = "Allow"
+    effect  = "Allow"
     actions = ["sts:AssumeRole"]
 
     principals {
-      type = "Service"
+      type        = "Service"
       identifiers = ["firehose.amazonaws.com"]
     }
 
     condition {
       test     = "StringEquals"
       variable = "sts:ExternalId"
-      values = [local.account_id]
+      values   = [local.account_id]
     }
   }
 }

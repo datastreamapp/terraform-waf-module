@@ -1,0 +1,91 @@
+name: Test
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+# Restrict permissions for security (CKV2_GHA_1)
+permissions:
+  contents: read
+
+jobs:
+  terraform:
+    name: Terraform Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init
+        run: terraform init -backend=false
+
+      - name: Terraform Validate
+        run: terraform validate
+
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive
+
+      - name: Setup tflint
+        uses: terraform-linters/setup-tflint@v4
+
+      - name: Run tflint
+        run: |
+          tflint --init
+          tflint
+
+      - name: Run tfsec
+        uses: aquasecurity/tfsec-action@v1.0.0
+        with:
+          additional_args: --minimum-severity HIGH
+
+      - name: Run checkov
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: .
+          quiet: true
+          soft_fail: true
+
+  lambda:
+    name: Lambda Build Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Clone upstream source
+        run: |
+          git clone --depth 1 --branch v4.0.3 \
+            https://github.com/aws-solutions/aws-waf-security-automations.git upstream
+
+      - name: Build Docker image
+        run: docker build -t lambda-builder -f scripts/Dockerfile.lambda-builder scripts/
+
+      - name: Test log_parser build
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}/upstream:/upstream:ro \
+            -v ${{ github.workspace }}/lambda:/output \
+            lambda-builder log_parser /upstream /output
+
+      - name: Test reputation_lists_parser build
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}/upstream:/upstream:ro \
+            -v ${{ github.workspace }}/lambda:/output \
+            lambda-builder reputation_lists_parser /upstream /output
+
+      - name: Summary
+        run: |
+          echo "## Lambda Build Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Package | Size | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|------|--------|" >> $GITHUB_STEP_SUMMARY
+          for zip in lambda/*.zip; do
+            size=$(ls -lh "$zip" | awk '{print $5}')
+            echo "| $(basename $zip) | $size | ✅ PASS |" >> $GITHUB_STEP_SUMMARY
+          done

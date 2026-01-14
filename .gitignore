@@ -20,3 +20,9 @@ node_modules
 
 # OS
 .DS_Store
+
+# Upstream source (cloned during build)
+upstream/
+
+# Presentation docs (not for commit)
+walkthrough.md
