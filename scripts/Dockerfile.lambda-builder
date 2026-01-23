@@ -3,7 +3,7 @@ FROM public.ecr.aws/lambda/python:3.13
 # Install build tools
 RUN dnf install -y zip unzip bc && \
     pip install --upgrade pip && \
-    pip install poetry pip-audit
+    pip install poetry poetry-plugin-export pip-audit
 
 WORKDIR /build
 
