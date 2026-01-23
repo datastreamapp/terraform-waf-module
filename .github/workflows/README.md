@@ -529,15 +529,17 @@ PR features:
 │   │  3. Checkout upstream (sparse)                           │   │
 │   │  4. Verify directories exist                             │   │
 │   │  5. Build Docker image                                   │   │
-│   │  6. Build log_parser.zip                                 │   │
-│   │  7. Build reputation_lists_parser.zip                    │   │
+│   │  6. Build log_parser.zip (includes tests)                │   │
+│   │  7. Build reputation_lists_parser.zip (includes tests)   │   │
 │   │  8. Security scan (pip-audit)                            │   │
 │   │  9. Validation summary                                   │   │
-│   │ 10. Create Pull Request                                  │   │
+│   │ 10. Commit zips to lambda/                               │   │
+│   │ 11. Create Pull Request                                  │   │
 │   └─────────────────────────────────────────────────────────┘   │
 │                    │                                             │
 │                    ▼                                             │
 │   Output: PR with new Lambda packages                            │
+│           (Human reviews and approves to merge)                  │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```

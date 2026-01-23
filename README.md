@@ -206,8 +206,8 @@ flowchart TB
         end
 
         subgraph Lambda["Lambda Functions"]
-            LP[("log_parser<br/>Python 3.13")]
-            RP[("reputation_lists_parser<br/>Python 3.13")]
+            LP[("log_parser")]
+            RP[("reputation_lists_parser")]
         end
 
         subgraph Storage["Storage"]
@@ -347,10 +347,12 @@ Before triggering a build, check the upstream changelog for available versions:
 ```mermaid
 flowchart LR
     A[Trigger Workflow] --> B[Build in Docker]
-    B --> C[Run Tests]
-    C --> D[Create PR]
-    D --> E[Review & Merge]
-    E --> F[Tag Release]
+    B --> C[Tests - Positive and Negative]
+    C --> D[Security Scan]
+    D --> E[Commit zips to lambda/]
+    E --> F[Create PR]
+    F --> G{{"Review PR and Approve to Merge Packages"}}
+    G --> H[Tag Release]
 
     linkStyle default stroke:#333,stroke-width:2px
 ```
