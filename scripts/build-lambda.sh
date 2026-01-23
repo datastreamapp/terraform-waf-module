@@ -90,7 +90,15 @@ if [[ -f "requirements.txt" ]]; then
 # Fallback to pyproject.toml if exists
 elif [[ -f "pyproject.toml" ]]; then
     echo "  Using pyproject.toml (poetry export)"
-    poetry export --without dev -f requirements.txt -o "${BUILD_DIR}/requirements.txt" 2>/dev/null || {
+    # Generate lock file if missing (required for poetry export)
+    if [[ ! -f "poetry.lock" ]]; then
+        echo "  Generating poetry.lock file..."
+        poetry lock --no-interaction || {
+            echo "ERROR: Poetry lock failed"
+            exit 1
+        }
+    fi
+    poetry export --without dev -f requirements.txt -o "${BUILD_DIR}/requirements.txt" || {
         echo "ERROR: Poetry export failed"
         exit 1
     }

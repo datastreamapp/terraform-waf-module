@@ -7,20 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Fixed Poetry export failure in Lambda build script by adding `poetry lock` step before export (`scripts/build-lambda.sh:91-101`)
+
+### Added
+- `docs/QUICKSTART.md` - Step-by-step guide for updating Lambda packages
+- `docs/RETROSPECTIVE.md` - Lessons learned and process improvements
+- `docs/TODOLIST-801.md` - Implementation task tracking
+- Upstream version selection documentation in README.md
+- Version bump guidelines documentation
+- Workflow inputs reference documentation
+- Table of contents in README.md
+
+### Changed
+- Moved CHANGELOG.md to `docs/CHANGELOG.md`
+- Moved TODOLIST.md to `docs/TODOLIST-801.md`
+
 ## [3.1.0] - 2026-01-20
 
 ### Changed
 - Downgraded AWS provider from `>= 6.0` to `>= 5.0` for compatibility with current Terraform version on production and lower environments (`versions.tf:7`)
 
-## [3.0.0] - YYYY-MM-DD
+## [3.0.0] - 2026-01-14
 
 ### Added
 - Automated CI/CD pipeline for building Lambda packages (GitHub Actions)
 - Docker-based build environment for Lambda compatibility
 - Comprehensive build validation tests (positive and negative)
 - Security scanning with pip-audit
-- TODOLIST.md for implementation tracking
 - Architecture documentation with Mermaid diagrams (docs/ARCHITECTURE.md)
+- Testing documentation (docs/TESTING.md)
 - Build documentation in README.md
 
 ### Changed
