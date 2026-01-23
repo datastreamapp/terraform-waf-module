@@ -65,6 +65,14 @@ jobs:
       - name: Build Docker image
         run: docker build -t lambda-builder -f scripts/Dockerfile.lambda-builder scripts/
 
+      - name: Verify poetry-plugin-export installed
+        run: |
+          docker run --rm --entrypoint="" lambda-builder poetry self show plugins | grep -q "poetry-plugin-export" || {
+            echo "ERROR: poetry-plugin-export not installed"
+            exit 1
+          }
+          echo "poetry-plugin-export is installed"
+
       - name: Test log_parser build
         run: |
           docker run --rm \
