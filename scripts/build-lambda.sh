@@ -90,17 +90,26 @@ if [[ -f "requirements.txt" ]]; then
 # Fallback to pyproject.toml if exists
 elif [[ -f "pyproject.toml" ]]; then
     echo "  Using pyproject.toml (poetry export)"
+    # Verify poetry-plugin-export is available
+    echo "  Checking poetry plugins..."
+    poetry self show plugins 2>/dev/null || echo "  (plugin check not available)"
+
     # Generate lock file if missing (required for poetry export)
     if [[ ! -f "poetry.lock" ]]; then
         echo "  Generating poetry.lock file..."
-        poetry lock --no-interaction || {
+        poetry lock --no-interaction 2>&1 || {
             echo "ERROR: Poetry lock failed"
             exit 1
         }
     fi
-    poetry export --without dev -f requirements.txt -o "${BUILD_DIR}/requirements.txt" || {
+    echo "  Running poetry export..."
+    poetry export --without dev -f requirements.txt -o "${BUILD_DIR}/requirements.txt" 2>&1 || {
         echo "ERROR: Poetry export failed"
-        exit 1
+        echo "  Trying alternative: poetry export without --without flag..."
+        poetry export -f requirements.txt -o "${BUILD_DIR}/requirements.txt" --without-hashes 2>&1 || {
+            echo "ERROR: Poetry export failed (both attempts)"
+            exit 1
+        }
     }
     pip install -r "${BUILD_DIR}/requirements.txt" -t "${BUILD_DIR}" --quiet --no-cache-dir || {
         echo "ERROR: pip install failed"
