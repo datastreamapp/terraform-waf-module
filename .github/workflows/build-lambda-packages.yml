@@ -39,7 +39,7 @@ jobs:
       - name: Checkout terraform-waf-module
         uses: actions/checkout@v4
         with:
-          ref: master
+          ref: ${{ github.ref }}
           fetch-depth: 0
 
       - name: Calculate version
