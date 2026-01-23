@@ -10,16 +10,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Fixed Poetry export failure in Lambda build script by adding `poetry lock` step before export (`scripts/build-lambda.sh:91-101`)
 - Fixed Poetry export failure in Docker build by adding `poetry-plugin-export` (required for Poetry 1.2+) (`scripts/Dockerfile.lambda-builder:6`)
+- Fixed sparse checkout not getting all files by adding `sparse-checkout-cone-mode: false` (`.github/workflows/build-lambda-packages.yml:83`)
+- Fixed workflow using wrong branch by changing hardcoded `ref: master` to `ref: ${{ github.ref }}` (`.github/workflows/build-lambda-packages.yml:42`)
 - Fixed Mermaid diagram rendering issues by removing `<br/>` tags and numbered prefixes that caused "Unsupported markdown: list" warnings (`docs/ARCHITECTURE.md`)
 
 ### Added
 - Added test to verify `poetry-plugin-export` is installed in Docker image (`.github/workflows/test.yml`)
 - Added explicit "Commit zips to lambda/" step in CI/CD pipeline diagram
 - Added "Human Review PR and Approve to Merge Packages" step in CI/CD pipeline diagram
+- Added verbose output and fallback for poetry export in build script (`scripts/build-lambda.sh`)
+- Added file listing in upstream checkout verification step
 
 ### Changed
 - Simplified Validate step in CI/CD pipeline diagram to show "Tests - Positive and Negative" (tests run inside Docker build)
 - Updated all documentation diagrams to show complete pipeline flow including human review step
+- Workflow now uses current branch ref instead of hardcoded master for flexibility during development
 
 ### Added
 - `docs/QUICKSTART.md` - Step-by-step guide for updating Lambda packages
