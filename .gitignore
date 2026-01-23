@@ -26,3 +26,5 @@ upstream/
 
 # Presentation docs (not for commit)
 walkthrough.md
+
+CLAUDE.md
