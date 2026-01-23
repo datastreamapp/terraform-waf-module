@@ -80,6 +80,7 @@ jobs:
             source/log_parser
             source/reputation_lists_parser
             source/lib
+          sparse-checkout-cone-mode: false
 
       - name: Verify upstream checkout
         run: |
@@ -89,7 +90,8 @@ jobs:
               echo "ERROR: upstream/source/${dir} not found"
               exit 1
             fi
-            echo "upstream/source/${dir} exists"
+            echo "=== Files in upstream/source/${dir} ==="
+            ls -la "upstream/source/${dir}/"
           done
 
       - name: Set up Docker Buildx
