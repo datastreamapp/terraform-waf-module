@@ -7,37 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-- Fixed Poetry export failure in Lambda build script by adding `poetry lock` step before export (`scripts/build-lambda.sh:91-101`)
-- Fixed Poetry export failure in Docker build by adding `poetry-plugin-export` (required for Poetry 1.2+) (`scripts/Dockerfile.lambda-builder:6`)
-- Fixed sparse checkout not getting all files by adding `sparse-checkout-cone-mode: false` (`.github/workflows/build-lambda-packages.yml:83`)
-- Fixed workflow using wrong branch by changing hardcoded `ref: master` to `ref: ${{ github.ref }}` (`.github/workflows/build-lambda-packages.yml:42`)
-- Fixed Mermaid diagram rendering issues by removing `<br/>` tags and numbered prefixes that caused "Unsupported markdown: list" warnings (`docs/ARCHITECTURE.md`)
-
-### Added
-- Added test to verify `poetry-plugin-export` is installed in Docker image (`.github/workflows/test.yml`)
-- Added explicit "Commit zips to lambda/" step in CI/CD pipeline diagram
-- Added "Human Review PR and Approve to Merge Packages" step in CI/CD pipeline diagram
-- Added verbose output and fallback for poetry export in build script (`scripts/build-lambda.sh`)
-- Added file listing in upstream checkout verification step
+## [4.0.0] - 2026-01-26
 
 ### Changed
+- Synced with upstream [aws-waf-security-automations v4.1.2](https://github.com/aws-solutions/aws-waf-security-automations)
+- Modernized CI/CD pipeline with Docker-based Lambda builds
+- Workflow now uses current branch ref instead of hardcoded master for flexibility during development
 - Simplified Validate step in CI/CD pipeline diagram to show "Tests - Positive and Negative" (tests run inside Docker build)
 - Updated all documentation diagrams to show complete pipeline flow including human review step
-- Workflow now uses current branch ref instead of hardcoded master for flexibility during development
+- Moved CHANGELOG.md to `docs/CHANGELOG.md`
 
 ### Added
 - `docs/QUICKSTART.md` - Step-by-step guide for updating Lambda packages
 - `docs/RETROSPECTIVE.md` - Lessons learned and process improvements
-- `docs/TODOLIST-801.md` - Implementation task tracking
 - Upstream version selection documentation in README.md
 - Version bump guidelines documentation
 - Workflow inputs reference documentation
 - Table of contents in README.md
+- Test to verify `poetry-plugin-export` is installed in Docker image
+- Verbose output and fallback for poetry export in build script
+
+### Fixed
+- Fixed Poetry export failure in Lambda build script by adding `poetry lock` step before export
+- Fixed Poetry export failure in Docker build by adding `poetry-plugin-export` (required for Poetry 1.2+)
+- Fixed sparse checkout not getting all files by adding `sparse-checkout-cone-mode: false`
+- Fixed workflow using wrong branch by changing hardcoded `ref: master` to `ref: ${{ github.ref }}`
+- Fixed Mermaid diagram rendering issues by removing `<br/>` tags and numbered prefixes
+
+## [3.2.0] - 2026-01-24
 
 ### Changed
-- Moved CHANGELOG.md to `docs/CHANGELOG.md`
-- Moved TODOLIST.md to `docs/TODOLIST-801.md`
+- Minor documentation and workflow improvements
 
 ## [3.1.0] - 2026-01-20
 
