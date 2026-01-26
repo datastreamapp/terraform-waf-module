@@ -4,6 +4,34 @@ A Terraform module for deploying AWS WAF (Web Application Firewall) with automat
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
+## Table of Contents
+
+- [Overview](#overview)
+- [Quick Start: Update Lambda](#quick-start-update-lambda)
+- [Features](#features)
+- [How It Works](#how-it-works)
+  - [Log Parser Lambda](#log-parser-lambda)
+  - [Reputation Lists Parser Lambda](#reputation-lists-parser-lambda)
+- [Prerequisites](#prerequisites)
+- [Usage](#usage)
+- [Architecture](#architecture)
+- [WAF Rules](#waf-rules)
+- [Inputs](#inputs)
+- [Outputs](#outputs)
+- [Lambda Build Process](#lambda-build-process)
+  - [Upstream Version Selection](#upstream-version-selection)
+  - [Triggering Lambda Updates](#triggering-lambda-updates-github-actions)
+  - [Version Bump Guidelines](#version-bump-guidelines)
+  - [Local Build](#local-build)
+- [Versioning](#versioning)
+- [Documentation](#documentation)
+- [File Structure](#file-structure)
+- [Contributing](#contributing)
+- [License](#license)
+- [References](#references)
+
+---
+
 ## Overview
 
 This module deploys a complete WAF solution including:
@@ -36,6 +64,18 @@ flowchart LR
 ```
 
 > **Note:** This module creates the WAF and outputs its ARN. You must create your own CloudFront/ALB/API Gateway and associate them using `aws_wafv2_web_acl_association`.
+
+## Quick Start: Update Lambda
+
+To update WAF Lambda packages to a new upstream version:
+
+```bash
+gh workflow run "Build WAF Lambda Packages" \
+  -f upstream_ref=v4.1.2 \
+  -f version_bump=patch
+```
+
+See [docs/QUICKSTART.md](docs/QUICKSTART.md) for the full step-by-step guide.
 
 ## Features
 
@@ -132,7 +172,7 @@ resource "aws_kms_key" "waf" {
 }
 ```
 
-## Quick Start
+## Usage
 
 ```hcl
 module "waf" {
@@ -166,8 +206,8 @@ flowchart TB
         end
 
         subgraph Lambda["Lambda Functions"]
-            LP[("log_parser<br/>Python 3.13")]
-            RP[("reputation_lists_parser<br/>Python 3.13")]
+            LP[("log_parser")]
+            RP[("reputation_lists_parser")]
         end
 
         subgraph Storage["Storage"]
@@ -246,7 +286,7 @@ The upstream [aws-waf-security-automations](https://github.com/aws-solutions/aws
 repository specifies `python = ~3.12` in their pyproject.toml. Using Python 3.13 provides a balance between
 newer features and maintaining compatibility with upstream-tested dependencies.
 
-See [CHANGELOG.md](CHANGELOG.md) for detailed rationale.
+See [docs/CHANGELOG.md](docs/CHANGELOG.md) for detailed rationale.
 
 ## WAF Rules
 
@@ -292,26 +332,71 @@ See [variables.tf](variables.tf) for full list of inputs.
 
 Lambda packages are built automatically from [aws-solutions/aws-waf-security-automations](https://github.com/aws-solutions/aws-waf-security-automations).
 
-### Automated Build (Recommended)
+### Upstream Version Selection
+
+Before triggering a build, check the upstream changelog for available versions:
+- **Upstream Changelog:** https://github.com/aws-solutions/aws-waf-security-automations/blob/main/CHANGELOG.md
+
+| Field | Description |
+|-------|-------------|
+| **Current Default** | `v4.0.3` (configured in workflow) |
+| **Where to Check** | [Upstream CHANGELOG.md](https://github.com/aws-solutions/aws-waf-security-automations/blob/main/CHANGELOG.md) |
+
+### Triggering Lambda Updates (GitHub Actions)
 
 ```mermaid
 flowchart LR
     A[Trigger Workflow] --> B[Build in Docker]
-    B --> C[Run Tests]
-    C --> D[Create PR]
-    D --> E[Review & Merge]
-    E --> F[Tag Release]
+    B --> C[Tests - Positive and Negative]
+    C --> D[Security Scan]
+    D --> E[Commit zips to lambda/]
+    E --> F[Create PR]
+    F --> G{{"Review PR and Approve to Merge Packages"}}
+    G --> H[Tag Release]
 
     linkStyle default stroke:#333,stroke-width:2px
 ```
 
-1. Go to **Actions** > **Build WAF Lambda Packages**
-2. Click **Run workflow**
-3. Configure:
-   - **Upstream ref**: Tag (e.g., `v4.0.3`)
-   - **Version bump**: `none`, `patch`, `minor`, `major`
-4. Review and merge the generated PR
-5. Create release tag after merge
+**To update Lambda packages with a new upstream version:**
+
+1. Go to **Actions** tab in GitHub
+2. Select **Build WAF Lambda Packages** workflow
+3. Click **Run workflow** button
+4. Configure the workflow inputs:
+
+| Input | Description | Example |
+|-------|-------------|---------|
+| **upstream_ref** | Tag from upstream repo to build from | `v4.0.3`, `v4.1.0`, `v4.1.2` |
+| **version_bump** | How to bump this module's version | `none`, `patch`, `minor`, `major` |
+
+5. Click **Run workflow** to start the build
+6. Review and merge the generated PR
+7. Create release tag after merge (if version bump was requested)
+
+### Version Bump Guidelines
+
+| Bump Type | When to Use | Example |
+|-----------|-------------|---------|
+| `none` | Testing build, no release planned | Local validation |
+| `patch` | Security updates, bug fixes from upstream | `v4.0.3` → `v4.0.4` security patch |
+| `minor` | New features, dependency updates | `v4.0.x` → `v4.1.0` feature release |
+| `major` | Breaking changes, Python runtime upgrade | Python 3.12 → 3.13 |
+
+### Workflow Inputs Reference
+
+The workflow is defined in `.github/workflows/build-lambda-packages.yml`:
+
+```yaml
+inputs:
+  upstream_ref:
+    description: 'Upstream repo tag (e.g., v4.0.3)'
+    default: 'v4.0.3'  # Update this to change default version
+  version_bump:
+    description: 'Version bump type for this release'
+    options: ['none', 'patch', 'minor', 'major']
+```
+
+**To change the default upstream version**, edit the `default` value in the workflow file.
 
 ### Local Build
 
@@ -362,15 +447,17 @@ This project follows [Semantic Versioning](https://semver.org/).
 | **minor** | New features, dependency updates |
 | **patch** | Bug fixes, security patches |
 
-Current version: See [CHANGELOG.md](CHANGELOG.md)
+Current version: See [docs/CHANGELOG.md](docs/CHANGELOG.md)
 
 ## Documentation
 
 | Document | Description |
 |----------|-------------|
 | [README.md](README.md) | This file |
-| [CHANGELOG.md](CHANGELOG.md) | Version history and decisions |
-| [TODOLIST.md](TODOLIST.md) | Implementation tasks |
+| [docs/QUICKSTART.md](docs/QUICKSTART.md) | How to update WAF Lambda packages |
+| [docs/CHANGELOG.md](docs/CHANGELOG.md) | Version history and decisions |
+| [docs/TODOLIST-801.md](docs/TODOLIST-801.md) | Implementation task tracking |
+| [docs/RETROSPECTIVE.md](docs/RETROSPECTIVE.md) | Lessons learned, checklists, and governance |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Architecture diagrams |
 | [docs/TESTING.md](docs/TESTING.md) | Testing guide |
 
@@ -380,10 +467,15 @@ Current version: See [CHANGELOG.md](CHANGELOG.md)
 terraform-waf-module/
 |- .github/
 |  |- workflows/
-|     |- build-lambda-packages.yml  # CI/CD pipeline
+|     |- build-lambda-packages.yml  # Lambda build workflow
+|     |- test.yml                   # CI/CD test workflow
 |- docs/
 |  |- ARCHITECTURE.md               # Architecture diagrams
+|  |- CHANGELOG.md                  # Version history
+|  |- QUICKSTART.md                 # How to update Lambda packages
+|  |- RETROSPECTIVE.md              # Lessons learned
 |  |- TESTING.md                    # Testing guide
+|  |- TODOLIST-801.md               # Implementation task tracking
 |- lambda/
 |  |- log_parser.zip                # Built artifact
 |  |- reputation_lists_parser.zip   # Built artifact
@@ -395,8 +487,6 @@ terraform-waf-module/
 |- lambda.reputation-list.tf        # Lambda TF config
 |- main.tf                          # WAF Web ACL
 |- Makefile                         # Build and test automation
-|- CHANGELOG.md                     # Version history
-|- TODOLIST.md                      # Implementation tasks
 |- README.md                        # Project documentation
 ```
 

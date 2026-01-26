@@ -529,15 +529,17 @@ PR features:
 │   │  3. Checkout upstream (sparse)                           │   │
 │   │  4. Verify directories exist                             │   │
 │   │  5. Build Docker image                                   │   │
-│   │  6. Build log_parser.zip                                 │   │
-│   │  7. Build reputation_lists_parser.zip                    │   │
+│   │  6. Build log_parser.zip (includes tests)                │   │
+│   │  7. Build reputation_lists_parser.zip (includes tests)   │   │
 │   │  8. Security scan (pip-audit)                            │   │
 │   │  9. Validation summary                                   │   │
-│   │ 10. Create Pull Request                                  │   │
+│   │ 10. Commit zips to lambda/                               │   │
+│   │ 11. Create Pull Request                                  │   │
 │   └─────────────────────────────────────────────────────────┘   │
 │                    │                                             │
 │                    ▼                                             │
 │   Output: PR with new Lambda packages                            │
+│           (Human reviews and approves to merge)                  │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -590,3 +592,8 @@ git push origin "v3.0.0"
 | Lambda build fails | Upstream structure changed | Check upstream repo for changes |
 | PR creation fails | Missing permissions | Ensure `contents: write` and `pull-requests: write` |
 | Sparse checkout fails | Directory doesn't exist | Verify upstream ref has required directories |
+| Poetry export failed | Poetry 1.2+ requires plugin | Add `poetry-plugin-export` to Dockerfile |
+| Poetry export failed (no lock) | Missing poetry.lock file | Add `poetry lock --no-interaction` before export |
+| Sparse checkout missing files | Cone mode enabled by default | Add `sparse-checkout-cone-mode: false` |
+| Workflow uses wrong branch | Hardcoded `ref: master` | Use `ref: ${{ github.ref }}` for current branch |
+| PR creation permission denied | GitHub Actions setting disabled | Enable "Allow GitHub Actions to create pull requests" in repo settings |

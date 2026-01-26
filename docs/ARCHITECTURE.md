@@ -8,41 +8,41 @@ This document describes the architecture of the terraform-waf-module and its CI/
 flowchart TB
     subgraph Module["This Module Creates"]
         subgraph WAF["AWS WAF"]
-            ACL[Web ACL<br/>main.tf:3]
-            Rules[WAF Rules<br/>main.tf]
+            ACL["Web ACL"]
+            Rules["WAF Rules"]
         end
 
         subgraph Lambda["Lambda Functions"]
-            LP[("log_parser<br/>lambda.log-parser.tf:169")]
-            RP[("reputation_lists_parser<br/>lambda.reputation-list.tf:86")]
+            LP[("log_parser")]
+            RP[("reputation_lists_parser")]
         end
 
         subgraph Storage["Storage"]
-            IPSet[(WAF IP Sets<br/>ipset.tf)]
+            IPSet[("WAF IP Sets")]
         end
 
         subgraph Triggers["Triggers"]
-            SNS[SNS Topic<br/>lambda.log-parser.tf:259]
-            CW[CloudWatch Events<br/>lambda.reputation-list.tf:131]
+            SNS["SNS Topic"]
+            CW["CloudWatch Events"]
         end
 
-        Output[/"Output: WAF ARN<br/>output.tf:2"/]
+        Output[/"Output: WAF ARN"/]
     end
 
     subgraph External["External - Consumer Responsibility"]
-        S3[(S3 Logs Bucket<br/>var.logging_bucket)]
+        S3[("S3 Logs Bucket")]
         CF[CloudFront]
         ALB[ALB]
         APIGW[API Gateway]
-        Note["Associate WAF using<br/>aws_wafv2_web_acl_association"]
+        Note["Associate via aws_wafv2_web_acl_association"]
     end
 
     CF & ALB & APIGW -.->|"Consumer associates"| ACL
     ACL --> Rules
-    S3 -->|"Log prefixes:<br/>CloudFront/, ALB/, WAF/<br/>lambda.log-parser.tf:236,245,254"| SNS
+    S3 -->|"Log prefixes: CloudFront, ALB, WAF"| SNS
     SNS --> LP
     LP --> IPSet
-    CW -->|"rate(1 hour)<br/>:135"| RP
+    CW -->|"rate 1 hour"| RP
     RP --> IPSet
     IPSet --> Rules
     ACL --> Output
@@ -77,44 +77,48 @@ flowchart TB
 
 ```mermaid
 flowchart LR
-    subgraph Trigger["1. Trigger"]
-        Manual[/"workflow_dispatch<br/>(Manual)"/]
+    subgraph Trigger["Trigger"]
+        Manual[/"workflow_dispatch"/]
     end
 
-    subgraph Checkout["2. Checkout"]
+    subgraph Checkout["Checkout"]
         Repo[terraform-waf-module]
-        Upstream[aws-waf-security-<br/>automations]
+        Upstream[aws-waf-security-automations]
     end
 
-    subgraph Build["3. Docker Build"]
+    subgraph Build["Docker Build"]
         direction TB
-        Docker[("Docker Container<br/>Python 3.13<br/>Amazon Linux 2023")]
-        LP_Build[Build log_parser.zip]
-        RP_Build[Build reputation_lists_parser.zip]
+        Docker[("Python 3.13 Amazon Linux 2023")]
+        LP_Build[log_parser.zip]
+        RP_Build[reputation_lists_parser.zip]
         Docker --> LP_Build --> RP_Build
     end
 
-    subgraph Validate["4. Validate"]
+    subgraph Validate["Validate"]
         direction TB
-        Pos[/"Positive Tests"/]
-        Neg[/"Negative Tests"/]
-        Sec[/"Security Scan"/]
+        Tests[/"Tests - Positive and Negative"/]
+        Sec[/"Security Scan - pip-audit"/]
     end
 
-    subgraph Output["5. Output"]
-        PR[("Create PR<br/>for Review")]
+    subgraph Output["Output"]
+        direction TB
+        Commit["Commit zips to lambda/"]
+        PR[("Create PR")]
+        Review{{"Review PR and Approve to Merge Packages"}}
+        Commit --> PR --> Review
     end
 
     Manual --> Repo
     Manual --> Upstream
     Repo --> Docker
     Upstream --> Docker
-    RP_Build --> Pos --> Neg --> Sec --> PR
+    RP_Build --> Tests --> Sec --> Commit
 
     style Docker fill:#FF9900,stroke:#232F3E,color:white
+    style Commit fill:#0366d6,stroke:#0366d6,color:white
     style PR fill:#238636,stroke:#238636,color:white
-    style Pos fill:#28a745,stroke:#28a745,color:white
-    style Neg fill:#dc3545,stroke:#dc3545,color:white
+    style Review fill:#6f42c1,stroke:#6f42c1,color:white
+    style Tests fill:#28a745,stroke:#28a745,color:white
     style Sec fill:#6f42c1,stroke:#6f42c1,color:white
 
     linkStyle default stroke:#333,stroke-width:2px
@@ -127,29 +131,29 @@ This workflow runs automatically on every push to `master` and on pull requests.
 ```mermaid
 flowchart LR
     subgraph Trigger["Triggers"]
-        Push["Push to master<br/>.github/workflows/test.yml:4-5"]
-        PR["Pull Request<br/>.github/workflows/test.yml:6-7"]
+        Push["Push to master"]
+        PR["Pull Request"]
     end
 
     subgraph TerraformJob["Job: terraform"]
         direction TB
-        T1["Checkout<br/>:18-19"]
-        T2["terraform init<br/>:24-25"]
-        T3["terraform validate<br/>:27-28"]
-        T4["terraform fmt -check<br/>:30-31"]
-        T5["tflint<br/>:33-39"]
-        T6["tfsec<br/>:41-42"]
-        T7["checkov<br/>:44-49"]
+        T1["Checkout"]
+        T2["terraform init"]
+        T3["terraform validate"]
+        T4["terraform fmt -check"]
+        T5["tflint"]
+        T6["tfsec"]
+        T7["checkov"]
         T1 --> T2 --> T3 --> T4 --> T5 --> T6 --> T7
     end
 
     subgraph LambdaJob["Job: lambda"]
         direction TB
-        L1["Checkout<br/>:55-56"]
-        L2["Clone upstream<br/>:58-61"]
-        L3["Build Docker<br/>:63-64"]
-        L4["Test log_parser<br/>:66-71"]
-        L5["Test reputation_lists<br/>:73-78"]
+        L1["Checkout"]
+        L2["Clone upstream"]
+        L3["Build Docker"]
+        L4["Test log_parser"]
+        L5["Test reputation_lists"]
         L1 --> L2 --> L3 --> L4 --> L5
     end
 
@@ -168,27 +172,27 @@ flowchart LR
 ```mermaid
 flowchart TD
     subgraph Input["Input"]
-        US[("Upstream Source<br/>aws-waf-security-automations")]
+        US[("Upstream aws-waf-security-automations")]
         PP["pyproject.toml"]
         LIB["source/lib/*.py"]
     end
 
-    subgraph Process["Build Process (Docker)"]
+    subgraph Process["Build Process - Docker"]
         direction TB
-        A[1. Poetry export to requirements.txt]
-        B[2. pip install to build dir]
-        C[3. Copy handler *.py files]
-        D[4. Copy shared lib/ files]
-        E[5. Clean __pycache__, .pyc]
-        F[6. Create zip archive]
+        A["Poetry export to requirements.txt"]
+        B["pip install to build dir"]
+        C["Copy handler *.py files"]
+        D["Copy shared lib/ files"]
+        E["Clean __pycache__ and .pyc"]
+        F["Create zip archive"]
         A --> B --> C --> D --> E --> F
     end
 
     subgraph Tests["Validation Tests"]
         direction TB
-        T1["Zip exists & not empty"]
+        T1["Zip exists and not empty"]
         T2["Handler file exists"]
-        T3["Size < 50MB"]
+        T3["Size under 50MB"]
         T4["Required libs included"]
         T5["No __pycache__"]
         T6["No .pyc files"]
@@ -197,7 +201,7 @@ flowchart TD
     end
 
     subgraph Output["Output"]
-        ZIP[("log_parser.zip<br/>reputation_lists_parser.zip")]
+        ZIP[("log_parser.zip and reputation_lists_parser.zip")]
     end
 
     US --> PP --> A
@@ -250,9 +254,9 @@ sequenceDiagram
 ```mermaid
 flowchart LR
     subgraph Options["Available Options"]
-        P312["Python 3.12<br/>Upstream tested"]
-        P313["Python 3.13<br/>Stable + Modern"]
-        P314["Python 3.14<br/>Bleeding edge"]
+        P312["Python 3.12 - Upstream tested"]
+        P313["Python 3.13 - Stable Modern"]
+        P314["Python 3.14 - Bleeding edge"]
     end
 
     subgraph Decision["Decision Factors"]
