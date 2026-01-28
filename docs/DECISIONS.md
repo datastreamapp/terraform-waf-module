@@ -1,0 +1,165 @@
+# Architecture Decision Records
+
+This document captures key technical and architectural decisions for the terraform-waf-module, along with context and rationale.
+
+## Table of Contents
+
+- [ADR-001: Python 3.13 over 3.14](#adr-001-python-313-over-314)
+- [ADR-002: Lambda Powertools via Layer (SSM) instead of bundling in zip](#adr-002-lambda-powertools-via-layer-ssm-instead-of-bundling-in-zip)
+- [ADR-003: Build validation with Layer/Runtime package allowlists](#adr-003-build-validation-with-layerruntime-package-allowlists)
+
+---
+
+## ADR-001: Python 3.13 over 3.14
+
+**Date:** 2026-01-14
+**Status:** Accepted
+**Issue:** [#801](https://github.com/datastreamapp/issues/issues/801)
+
+### Context
+
+The Lambda runtime needed upgrading from Python 3.9 (EOL). Both 3.13 and 3.14 are supported by AWS Lambda.
+
+### Decision
+
+Use Python 3.13.
+
+### Rationale
+
+| Factor | Python 3.14 | Python 3.13 | Winner |
+|--------|-------------|-------------|--------|
+| AWS Lambda Support | Supported | Supported | Tie |
+| Upstream Compatibility | Untested (upstream uses ~3.12) | Closer to 3.12 | 3.13 |
+| Release Maturity | Bleeding edge | More stable | 3.13 |
+| Dependency Risk | Higher | Lower | 3.13 |
+
+The upstream `aws-waf-security-automations` specifies `python = ~3.12`. Python 3.13 balances newer features with upstream compatibility.
+
+### Consequences
+
+- Future upgrade to 3.14 once upstream updates their Python version requirement.
+
+---
+
+## ADR-002: Lambda Powertools via Layer (SSM) as defense-in-depth
+
+**Date:** 2026-01-28
+**Status:** Accepted
+**Issue:** [#801](https://github.com/datastreamapp/issues/issues/801)
+
+### Context
+
+Upstream [aws-waf-security-automations v4.0.5](https://github.com/aws-solutions/aws-waf-security-automations/blob/main/CHANGELOG.md) replaced the native Python logger with `aws_lambda_powertools` Logger, and [v4.1.0](https://github.com/aws-solutions/aws-waf-security-automations/blob/main/CHANGELOG.md) added Powertools Tracer for X-Ray tracing. Both Lambda handlers (`log_parser`, `reputation_lists_parser`) now import Logger and Tracer at the top level.
+
+The package is listed in the upstream `pyproject.toml` ([`aws-lambda-powertools = "~3.2.0"`](https://github.com/aws-solutions/aws-waf-security-automations/blob/main/source/reputation_lists_parser/pyproject.toml)) and should be bundled in the zip by the CI/CD build pipeline via Poetry export → pip install.
+
+However, the build produced incomplete zips. The root cause: upstream `pyproject.toml` specifies `python = "~3.12"` (requires <3.13) but the Docker build image runs Python 3.13. Poetry export added `; python_version == "3.12"` markers to every dependency, causing pip on Python 3.13 to skip all packages. See [RETROSPECTIVE.md](RETROSPECTIVE.md#2026-01-28-incomplete-lambda-zip-packages-issue-801) for the full investigation.
+
+AWS publishes Powertools as a [managed Lambda Layer](https://docs.aws.amazon.com/powertools/python/latest/getting-started/install/#lambda-layer) and recommends this as an installation method. The official documentation provides a [Terraform example using SSM Parameter Store](https://docs.aws.amazon.com/powertools/python/latest/getting-started/install/#using-ssm-parameter-store) to dynamically resolve the Layer ARN.
+
+### Decision
+
+Add the AWS Lambda Powertools Layer via SSM Parameter Store as **defense-in-depth**, in addition to the zip containing the dependency. The zips must also be rebuilt by CI/CD to include all dependencies.
+
+### Rationale
+
+| Approach | Pros | Cons |
+|----------|------|------|
+| Zip only (fix build) | Self-contained, no extra infra | Single point of failure if build breaks again |
+| Layer only | AWS-managed, always up-to-date | Doesn't fix the incomplete build problem, other deps still missing |
+| **Both (zip + Layer)** | Defense-in-depth, Layer takes precedence, catches build gaps | Slight redundancy for powertools |
+
+Why the Layer specifically:
+
+- AWS publishes Powertools layers to all regions under account [`017000801446`](https://docs.aws.amazon.com/powertools/python/latest/getting-started/install/#lambda-layer) (China: `498634801083`, GovCloud: `165087284144` / `165093116878`)
+- The [official Powertools install documentation](https://docs.aws.amazon.com/powertools/python/latest/getting-started/install/) provides the Layer as one of the primary installation methods alongside pip, with IaC examples for SAM, CDK, Serverless Framework, Terraform, and Pulumi
+- SSM path format [`/aws/service/powertools/python/{arch}/{python_version}/latest`](https://docs.aws.amazon.com/powertools/python/latest/getting-started/install/#using-ssm-parameter-store) resolves the correct ARN for the current region — no hardcoded ARNs needed
+- The Layer also includes `aws-xray-sdk`, providing coverage for Tracer without needing it separately in the zip
+- Using `latest` in the SSM path ensures automatic updates when AWS publishes new Layer versions
+- The zips still need rebuilding to include `jinja2`, `backoff`, `pyparsing`, and other deps not covered by the Layer
+
+### Implementation
+
+Based on the [Terraform example from official Powertools documentation](https://docs.aws.amazon.com/powertools/python/latest/getting-started/install/#using-ssm-parameter-store):
+
+```hcl
+# data.powertools-layer.tf
+data "aws_ssm_parameter" "powertools_layer" {
+  name = "/aws/service/powertools/python/x86_64/python3.13/latest"
+}
+
+# In each Lambda resource (lambda.log-parser.tf, lambda.reputation-list.tf)
+layers = [data.aws_ssm_parameter.powertools_layer.value]
+```
+
+### Consequences
+
+- Layer version changes happen on `terraform apply` — review plan output to catch unexpected updates
+- If AWS deprecates the SSM path format, we'll need to update the lookup mechanism
+- The CI/CD pipeline must also be fixed to produce complete zips — the Layer is defense-in-depth, not a substitute for a working build
+- Layer does not provide `jinja2`, `backoff`, `pyparsing`, or `urllib3` — zips must be rebuilt with all deps
+- Added to Version Dependencies table in [RETROSPECTIVE.md](RETROSPECTIVE.md#version-dependencies) for periodic review
+
+### References
+
+| Source | Link |
+|--------|------|
+| Powertools Install Docs (Layer + SSM + Terraform) | https://docs.aws.amazon.com/powertools/python/latest/getting-started/install/ |
+| Powertools GitHub (source, releases) | https://github.com/aws-powertools/powertools-lambda-python |
+| Powertools PyPI | https://pypi.org/project/aws-lambda-powertools/ |
+| Upstream CHANGELOG (v4.0.5: Logger, v4.1.0: Tracer) | https://github.com/aws-solutions/aws-waf-security-automations/blob/main/CHANGELOG.md |
+| Upstream pyproject.toml (dependency declaration) | https://github.com/aws-solutions/aws-waf-security-automations/blob/main/source/reputation_lists_parser/pyproject.toml |
+
+---
+
+## ADR-003: Build validation with strict import checking
+
+**Date:** 2026-01-28
+**Status:** Accepted
+**Issue:** [#801](https://github.com/datastreamapp/issues/issues/801)
+
+### Context
+
+The build validation in `scripts/build-lambda.sh` tests handler imports after packaging. When `aws_lambda_powertools` was missing, the import test silently fell through to a syntax check and reported PASS, masking the real failure. The incomplete zip shipped to production.
+
+### Decision
+
+Replace the permissive fallback with strict validation:
+
+- **`RUNTIME_PACKAGES`** (e.g., `boto3`, `botocore`) — WARN only. These are provided by the Lambda runtime and are legitimately unavailable during the Docker build.
+- **Any other missing module** — HARD FAIL. This means the build did not install all dependencies from `pyproject.toml` and the zip is incomplete.
+
+### Rationale
+
+- The previous fallback to syntax check (`py_compile`) masked real import failures — the build passed but the Lambda crashed at runtime
+- `boto3` and `botocore` are the only packages guaranteed by the Lambda runtime; everything else must be in the zip or a Layer
+- Any unresolved import beyond the runtime packages indicates an incomplete build that should block the pipeline
+
+### Consequences
+
+- If upstream adds new runtime-provided dependencies, they need to be added to the `RUNTIME_PACKAGES` array
+- This is documented in the Upstream Update Checklist in RETROSPECTIVE.md
+
+---
+
+## Template
+
+```markdown
+## ADR-NNN: [Title]
+
+**Date:** YYYY-MM-DD
+**Status:** Proposed | Accepted | Deprecated | Superseded by ADR-NNN
+**Issue:** [#NNN](url)
+
+### Context
+[What is the issue? What forces are at play?]
+
+### Decision
+[What was decided]
+
+### Rationale
+[Why this option over alternatives]
+
+### Consequences
+[What are the trade-offs and follow-up items]
+```

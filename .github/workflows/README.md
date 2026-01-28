@@ -184,15 +184,15 @@ Tests Lambda build process using Docker.
 ```yaml
 - name: Clone upstream source
   run: |
-    git clone --depth 1 --branch v4.0.3 \
+    git clone --depth 1 --branch v4.1.2 \
       https://github.com/aws-solutions/aws-waf-security-automations.git upstream
 ```
 
 Clones AWS's official WAF security automations repository. Options:
 - `--depth 1` - Shallow clone (only latest commit, faster)
-- `--branch v4.0.3` - Pin to specific version for reproducibility
+- `--branch v4.1.2` - Pin to specific version for reproducibility
 
-**Why v4.0.3?** This is a known-good version tested with our build process.
+**Why v4.1.2?** This matches the upstream version our module is synced with (v4.0.0 release). See [upstream CHANGELOG](https://github.com/aws-solutions/aws-waf-security-automations/blob/main/CHANGELOG.md).
 
 #### Step: Build Docker image (Lines 65-66)
 
@@ -275,8 +275,8 @@ on:
   workflow_dispatch:
     inputs:
       upstream_ref:
-        description: 'Upstream repo tag (e.g., v4.0.3)'
-        default: 'v4.0.3'
+        description: 'Upstream repo tag (e.g., v4.1.2)'
+        default: 'v4.1.2'
         required: true
         type: string
       version_bump:
@@ -561,14 +561,14 @@ Tests run automatically when you:
 2. Select "Build WAF Lambda Packages"
 3. Click "Run workflow"
 4. Fill in inputs:
-   - `upstream_ref`: Tag to build from (e.g., `v4.0.3`)
+   - `upstream_ref`: Tag to build from (e.g., `v4.1.2`)
    - `version_bump`: Version increment type
 5. Click "Run workflow"
 
 **Via CLI:**
 ```bash
 gh workflow run "Build WAF Lambda Packages" \
-  -f upstream_ref=v4.0.3 \
+  -f upstream_ref=v4.1.2 \
   -f version_bump=patch
 ```
 

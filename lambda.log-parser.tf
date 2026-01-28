@@ -177,6 +177,7 @@ resource "aws_lambda_function" "log-parser" {
   memory_size      = 512
   timeout          = 300
   publish          = true
+  layers           = [data.aws_ssm_parameter.powertools_layer.value]
 
   dead_letter_config {
     target_arn = var.dead_letter_arn

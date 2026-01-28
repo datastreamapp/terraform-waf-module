@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Added AWS Lambda Powertools Layer (via SSM Parameter Store) to both Lambda functions as defense-in-depth for `aws_lambda_powertools` dependency ([ADR-002](DECISIONS.md#adr-002-lambda-powertools-via-layer-ssm-as-defense-in-depth))
+- Fixed Poetry export Python version marker mismatch — `sed` now strips all `python_version` environment markers (any operator) so pip installs dependencies regardless of build Python version
+- Added `--without-hashes` to Poetry export to prevent orphaned `--hash` lines after marker stripping
+- Added pip install verification — build fails if no packages are actually installed after `pip install`
+- Rebuilt Lambda zips with all upstream dependencies (~19MB, previously ~1.7MB with missing deps)
+
+### Added
+- `scripts/test-integrity.sh` — system integrity test suite (58 checks): file existence, Terraform ↔ Lambda zip consistency, handler name consistency, Python runtime version consistency, upstream version consistency, Lambda Layer configuration, build script consistency, CI/CD workflow consistency, documentation cross-references, git hygiene
+- `make test-integrity` target — runs system integrity tests (included in `make test-all`)
+- `docs/DECISIONS.md` — Architecture Decision Records (ADR-001: Python 3.13, ADR-002: Lambda Powertools Layer, ADR-003: Build validation)
+
+### Changed
+- Updated default upstream version from `v4.0.3` to `v4.1.2` across all workflows, Makefile, and documentation
+- CI test workflow (`test.yml`) now clones upstream `v4.1.2` — tests the Poetry export code path instead of the old `requirements.txt` path
+
+### Improved
+- Build validation expanded from 9 to 25 tests per package (50 total): upstream dependency verification, minimum size check, dev dependency leak detection, `.dist-info`/`.egg-info`/test directory cleanup verification, handler rename verification, shared lib import tests, key dependency import tests
+- Build validation import test now categorizes errors: runtime environment (PASS), known runtime packages like boto3 (WARN), unknown missing modules (FAIL)
+- Fixed `pipefail` + `echo | grep` SIGPIPE bug — replaced with `grep <<< "$var"` (here-strings) and file-based grep
+
 ## [4.0.0] - 2026-01-26
 
 ### Changed

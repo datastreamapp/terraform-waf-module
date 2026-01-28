@@ -1,4 +1,4 @@
-.PHONY: test test-all test-local test-lambda validate fmt lint security build clean clone-upstream
+.PHONY: test test-all test-local test-lambda test-integrity validate fmt lint security build clean clone-upstream
 
 # Default test (quick - no Docker)
 test: validate fmt
@@ -6,8 +6,8 @@ test: validate fmt
 # Local test suite (Docker-based, no local tool installs needed)
 test-local: validate fmt lint security
 
-# Full test suite (includes Docker lambda builds)
-test-all: validate fmt lint security test-lambda
+# Full test suite (includes Docker lambda builds + integrity)
+test-all: validate fmt lint security test-lambda test-integrity
 
 # Terraform validation
 validate:
@@ -44,7 +44,7 @@ security:
 clone-upstream:
 	@if [ ! -d "upstream" ]; then \
 		echo "==> Cloning upstream source..."; \
-		git clone --depth 1 --branch v4.0.3 \
+		git clone --depth 1 --branch v4.1.2 \
 			https://github.com/aws-solutions/aws-waf-security-automations.git upstream; \
 	else \
 		echo "==> Upstream already exists, skipping clone"; \
@@ -70,6 +70,11 @@ test-lambda: clone-upstream build
 		lambda-builder reputation_lists_parser /upstream /output
 	@echo ""
 	@echo "==> All lambda tests passed!"
+
+# System integrity tests (cross-file consistency, no Docker needed)
+test-integrity:
+	@echo "==> Running system integrity tests..."
+	@bash scripts/test-integrity.sh
 
 # Clean up
 clean:

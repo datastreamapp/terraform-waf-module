@@ -419,7 +419,7 @@ This section provides traceability for all diagram elements to their source code
 | tflint run | `.github/workflows/test.yml:36-39` | `tflint --init && tflint` |
 | tfsec | `.github/workflows/test.yml:41-44` | `tfsec-action@v1.0.0, --minimum-severity HIGH` |
 | checkov | `.github/workflows/test.yml:46-52` | `checkov-action@v12, soft_fail: true` |
-| Clone upstream | `.github/workflows/test.yml:60-63` | `git clone ... v4.0.3` |
+| Clone upstream | `.github/workflows/test.yml:60-63` | `git clone ... v4.1.2` |
 | Docker build | `.github/workflows/test.yml:65-66` | `docker build -t lambda-builder` |
 | Test log_parser | `.github/workflows/test.yml:68-73` | `lambda-builder log_parser` |
 | Test reputation_lists | `.github/workflows/test.yml:75-80` | `lambda-builder reputation_lists_parser` |

@@ -4,8 +4,8 @@ on:
   workflow_dispatch:
     inputs:
       upstream_ref:
-        description: 'Upstream repo tag (e.g., v4.0.3)'
-        default: 'v4.0.3'
+        description: 'Upstream repo tag (e.g., v4.1.2)'
+        default: 'v4.1.2'
         required: true
         type: string
       version_bump:

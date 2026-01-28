@@ -12,7 +12,7 @@ Before updating, check what versions are available:
 
 | Current Default | Latest Available |
 |-----------------|------------------|
-| `v4.0.3` | Check changelog |
+| `v4.1.2` | Check changelog |
 
 ---
 
@@ -103,7 +103,7 @@ The upstream structure may have changed. Check:
 ```bash
 # Revert to previous upstream version
 gh workflow run "Build WAF Lambda Packages" \
-  -f upstream_ref=v4.0.3 \
+  -f upstream_ref=v4.1.2 \
   -f version_bump=none
 ```
 
