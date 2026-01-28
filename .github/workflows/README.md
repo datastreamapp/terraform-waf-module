@@ -317,7 +317,7 @@ Requires write access because this workflow:
 ```yaml
 env:
   UPSTREAM_REPO: aws-solutions/aws-waf-security-automations
-  PYTHON_VERSION: '3.13'
+  PYTHON_VERSION: '3.12'
 ```
 
 Centralized configuration for the workflow.

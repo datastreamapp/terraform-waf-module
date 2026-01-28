@@ -4,40 +4,46 @@ This document captures key technical and architectural decisions for the terrafo
 
 ## Table of Contents
 
-- [ADR-001: Python 3.13 over 3.14](#adr-001-python-313-over-314)
+- [ADR-001: Python 3.12 to match upstream constraint](#adr-001-python-312-to-match-upstream-constraint)
 - [ADR-002: Lambda Powertools via Layer (SSM) instead of bundling in zip](#adr-002-lambda-powertools-via-layer-ssm-instead-of-bundling-in-zip)
 - [ADR-003: Build validation with Layer/Runtime package allowlists](#adr-003-build-validation-with-layerruntime-package-allowlists)
 
 ---
 
-## ADR-001: Python 3.13 over 3.14
+## ADR-001: Python 3.12 to match upstream constraint
 
-**Date:** 2026-01-14
-**Status:** Accepted
+**Date:** 2026-01-14 (revised 2026-01-28)
+**Status:** Accepted (supersedes original 3.13 decision)
 **Issue:** [#801](https://github.com/datastreamapp/issues/issues/801)
 
 ### Context
 
-The Lambda runtime needed upgrading from Python 3.9 (EOL). Both 3.13 and 3.14 are supported by AWS Lambda.
+The Lambda runtime needed upgrading from Python 3.9 (EOL). The upstream [aws-waf-security-automations](https://github.com/aws-solutions/aws-waf-security-automations) specifies `python = "~3.12"` in their `pyproject.toml`, meaning `>=3.12.0, <3.13.0`.
+
+Initially we chose Python 3.13 as a balance between upstream compatibility and newer features. However, this created a version mismatch: Poetry export produced `python_version` markers tied to 3.12, and pip on 3.13 skipped all packages. We worked around this with a `sed` regex to strip markers — a fragile hack.
 
 ### Decision
 
-Use Python 3.13.
+Use Python 3.12 across the entire stack (Dockerfile, Lambda runtime, SSM Powertools path) to match upstream's constraint exactly.
 
 ### Rationale
 
-| Factor | Python 3.14 | Python 3.13 | Winner |
-|--------|-------------|-------------|--------|
-| AWS Lambda Support | Supported | Supported | Tie |
-| Upstream Compatibility | Untested (upstream uses ~3.12) | Closer to 3.12 | 3.13 |
-| Release Maturity | Bleeding edge | More stable | 3.13 |
-| Dependency Risk | Higher | Lower | 3.13 |
+| Approach | Pros | Cons |
+|----------|------|------|
+| Python 3.13 + sed workaround | Newer runtime | Fragile hack, version mismatch, could break on future deps |
+| **Python 3.12 (match upstream)** | Zero workarounds, matches tested config | Slightly older runtime |
+| Python 3.14 | Latest features | Untested by upstream, highest risk |
 
-The upstream `aws-waf-security-automations` specifies `python = ~3.12`. Python 3.13 balances newer features with upstream compatibility.
+Matching upstream eliminates:
+- The `sed` marker-stripping workaround
+- The `--without-hashes` workaround for orphaned hash lines after stripping
+- Risk of installing packages incompatible with the runtime version
 
 ### Consequences
 
-- Future upgrade to 3.14 once upstream updates their Python version requirement.
+- Python 3.12 is fully supported by AWS Lambda (EOL ~2028)
+- Upgrade to 3.13+ when upstream updates their `python = "~3.12"` constraint
+- No workarounds needed in the build pipeline
 
 ---
 
@@ -53,7 +59,7 @@ Upstream [aws-waf-security-automations v4.0.5](https://github.com/aws-solutions/
 
 The package is listed in the upstream `pyproject.toml` ([`aws-lambda-powertools = "~3.2.0"`](https://github.com/aws-solutions/aws-waf-security-automations/blob/main/source/reputation_lists_parser/pyproject.toml)) and should be bundled in the zip by the CI/CD build pipeline via Poetry export → pip install.
 
-However, the build produced incomplete zips. The root cause: upstream `pyproject.toml` specifies `python = "~3.12"` (requires <3.13) but the Docker build image runs Python 3.13. Poetry export added `; python_version == "3.12"` markers to every dependency, causing pip on Python 3.13 to skip all packages. See [RETROSPECTIVE.md](RETROSPECTIVE.md#2026-01-28-incomplete-lambda-zip-packages-issue-801) for the full investigation.
+However, the build initially produced incomplete zips due to a Python version mismatch (see [ADR-001](#adr-001-python-312-to-match-upstream-constraint)). This has been resolved by aligning the build to Python 3.12. See [RETROSPECTIVE.md](RETROSPECTIVE.md#2026-01-28-incomplete-lambda-zip-packages-issue-801) for the full investigation.
 
 AWS publishes Powertools as a [managed Lambda Layer](https://docs.aws.amazon.com/powertools/python/latest/getting-started/install/#lambda-layer) and recommends this as an installation method. The official documentation provides a [Terraform example using SSM Parameter Store](https://docs.aws.amazon.com/powertools/python/latest/getting-started/install/#using-ssm-parameter-store) to dynamically resolve the Layer ARN.
 
@@ -85,7 +91,7 @@ Based on the [Terraform example from official Powertools documentation](https://
 ```hcl
 # data.powertools-layer.tf
 data "aws_ssm_parameter" "powertools_layer" {
-  name = "/aws/service/powertools/python/x86_64/python3.13/latest"
+  name = "/aws/service/powertools/python/x86_64/python3.12/latest"
 }
 
 # In each Lambda resource (lambda.log-parser.tf, lambda.reputation-list.tf)

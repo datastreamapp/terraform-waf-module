@@ -133,7 +133,7 @@ echo ""
 echo "--- PYTHON RUNTIME CONSISTENCY ---"
 
 # All of these should reference the same Python version
-EXPECTED_PYTHON="3.13"
+EXPECTED_PYTHON="3.12"
 
 # Terraform Lambda runtime
 for tf_file in "${REPO_ROOT}"/lambda.*.tf; do
@@ -266,11 +266,11 @@ echo "--- BUILD SCRIPT CONSISTENCY ---"
 
 BUILD_SCRIPT="${REPO_ROOT}/scripts/build-lambda.sh"
 
-# Verify build script has marker stripping
-if grep -q 'python_version' "$BUILD_SCRIPT"; then
-    pass "build-lambda.sh has python_version marker stripping"
+# Verify build script does NOT have marker stripping (not needed with Python 3.12)
+if grep -q 'sed.*python_version' "$BUILD_SCRIPT"; then
+    fail "build-lambda.sh has python_version sed workaround (unnecessary with Python 3.12)"
 else
-    fail "build-lambda.sh missing python_version marker stripping"
+    pass "build-lambda.sh has no python_version sed workaround"
 fi
 
 # Verify build script has pip install verification

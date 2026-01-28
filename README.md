@@ -272,21 +272,16 @@ flowchart TB
 | `log_parser` | SNS (from S3 logs) | Parses WAF logs, blocks suspicious IPs |
 | `reputation_lists_parser` | CloudWatch (hourly) | Syncs external IP reputation lists |
 
-**Runtime:** Python 3.13 on Amazon Linux 2023
+**Runtime:** Python 3.12 on Amazon Linux 2023
 
-### Why Python 3.13 (not 3.14)?
-
-| Factor | Python 3.13 | Python 3.14 |
-|--------|-------------|-------------|
-| Upstream Compatibility | Closer to upstream's 3.12 | Untested |
-| Stability | Mature release | Bleeding edge |
-| Dependency Risk | Lower | Higher |
+### Why Python 3.12?
 
 The upstream [aws-waf-security-automations](https://github.com/aws-solutions/aws-waf-security-automations)
-repository specifies `python = ~3.12` in their pyproject.toml. Using Python 3.13 provides a balance between
-newer features and maintaining compatibility with upstream-tested dependencies.
+specifies `python = ~3.12` in their `pyproject.toml`. Using the same Python version ensures Poetry
+dependency resolution, pip installs, and runtime behavior all match upstream's tested configuration
+exactly — no workarounds needed.
 
-See [docs/CHANGELOG.md](docs/CHANGELOG.md) for detailed rationale.
+See [docs/DECISIONS.md](docs/DECISIONS.md) for detailed rationale.
 
 ## WAF Rules
 
@@ -380,7 +375,7 @@ flowchart LR
 | `none` | Testing build, no release planned | Local validation |
 | `patch` | Security updates, bug fixes from upstream | `v4.1.2` → `v4.1.3` security patch |
 | `minor` | New features, dependency updates | `v4.0.x` → `v4.1.0` feature release |
-| `major` | Breaking changes, Python runtime upgrade | Python 3.12 → 3.13 |
+| `major` | Breaking changes, Python runtime upgrade | Python 3.9 → 3.12 |
 
 ### Workflow Inputs Reference
 

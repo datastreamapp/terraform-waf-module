@@ -160,7 +160,7 @@ Tests run by `scripts/test-integrity.sh` (invoked via `make test-integrity`). Th
 | Upstream version consistency | 3 | `v4.1.2` across `test.yml`, `build-lambda-packages.yml`, `Makefile` |
 | Terraform integrity | 3 | `terraform init`, `validate`, `fmt -check` all pass |
 | Lambda Layer configuration | 4 | Both Lambdas have `layers`, SSM data source exists, path format valid |
-| Build script consistency | 6 | Marker stripping, pip verification, `--without-hashes`, handler mappings, required libs |
+| Build script consistency | 6 | No sed workaround, pip verification, `--without-hashes`, handler mappings, required libs |
 | CI/CD workflow consistency | 5 | Both packages tested/built, same Dockerfile, permissions configured |
 | Documentation cross-references | 5 | Docs reference correct upstream version, ADR exists, version table exists |
 | Git hygiene | 4 | Lambda zips tracked, upstream/ excluded, no secrets in tracked files |
@@ -184,10 +184,10 @@ bash scripts/test-integrity.sh
   PASS: Makefile references v4.1.2
 
 --- PYTHON RUNTIME CONSISTENCY ---
-  PASS: lambda.log-parser.tf runtime = python3.13
-  PASS: lambda.reputation-list.tf runtime = python3.13
-  PASS: Dockerfile base image = python:3.13
-  PASS: SSM Powertools path = python3.13
+  PASS: lambda.log-parser.tf runtime = python3.12
+  PASS: lambda.reputation-list.tf runtime = python3.12
+  PASS: Dockerfile base image = python:3.12
+  PASS: SSM Powertools path = python3.12
 
 ============================================
 RESULTS: 58 passed, 0 failed, 0 warnings (58 total)
@@ -224,11 +224,12 @@ Recorded 2026-01-28 from local Docker builds on `feature/801-add-required-depend
 
 | Metric | Value |
 |--------|-------|
-| **Zip size** | 19.63 MB |
+| **Zip size** | 22.12 MB |
 | **Installed packages** | 13 |
 | **Tests passed** | 25/25 |
 | **Handler** | `log-parser.py` (renamed from `log_parser.py`) |
 | **Dependencies** | backoff, pyparsing, aws-lambda-powertools, jinja2, aws-xray-sdk, urllib3 |
+| **Build Python** | 3.12 (matches upstream `python = ~3.12`) |
 | **Import result** | PASS (runtime environment error — expected, no AWS region in Docker) |
 
 #### Full test output
@@ -237,7 +238,7 @@ Recorded 2026-01-28 from local Docker builds on `feature/801-add-required-depend
 --- POSITIVE TESTS ---
   PASS: Zip file exists and is not empty
   PASS: Handler log-parser.py found in zip
-  PASS: Size 19.63MB (< 50MB limit)
+  PASS: Size 22.12MB (< 50MB limit)
   PASS: Required lib/waflibv2.py found
   PASS: Required lib/solution_metrics.py found
   PASS: Dependency 'backoff' found in zip
@@ -246,7 +247,7 @@ Recorded 2026-01-28 from local Docker builds on `feature/801-add-required-depend
   PASS: Dependency 'jinja2' found in zip
   PASS: Dependency 'aws-xray-sdk' found in zip
   PASS: Dependency 'urllib3' found in zip
-  PASS: Size 19.63MB exceeds 1MB minimum (dependencies present)
+  PASS: Size 22.12MB exceeds 1MB minimum (dependencies present)
 
 --- NEGATIVE TESTS ---
   PASS: Zip integrity verified (not corrupted)
@@ -274,11 +275,12 @@ Recorded 2026-01-28 from local Docker builds on `feature/801-add-required-depend
 
 | Metric | Value |
 |--------|-------|
-| **Zip size** | 19.29 MB |
+| **Zip size** | 21.57 MB |
 | **Installed packages** | 12 |
 | **Tests passed** | 24/24 |
 | **Handler** | `reputation-lists.py` (renamed from `reputation_lists.py`) |
 | **Dependencies** | backoff, aws-lambda-powertools, jinja2, aws-xray-sdk, urllib3 |
+| **Build Python** | 3.12 (matches upstream `python = ~3.12`) |
 | **Import result** | PASS (runtime environment error — expected, no AWS region in Docker) |
 
 #### Full test output
@@ -287,7 +289,7 @@ Recorded 2026-01-28 from local Docker builds on `feature/801-add-required-depend
 --- POSITIVE TESTS ---
   PASS: Zip file exists and is not empty
   PASS: Handler reputation-lists.py found in zip
-  PASS: Size 19.29MB (< 50MB limit)
+  PASS: Size 21.57MB (< 50MB limit)
   PASS: Required lib/waflibv2.py found
   PASS: Required lib/solution_metrics.py found
   PASS: Dependency 'backoff' found in zip
@@ -295,7 +297,7 @@ Recorded 2026-01-28 from local Docker builds on `feature/801-add-required-depend
   PASS: Dependency 'jinja2' found in zip
   PASS: Dependency 'aws-xray-sdk' found in zip
   PASS: Dependency 'urllib3' found in zip
-  PASS: Size 19.29MB exceeds 1MB minimum (dependencies present)
+  PASS: Size 21.57MB exceeds 1MB minimum (dependencies present)
 
 --- NEGATIVE TESTS ---
   PASS: Zip integrity verified (not corrupted)
@@ -501,10 +503,10 @@ Key validations:
 
 - **Terraform ↔ Lambda zip**: Every zip referenced in `.tf` files exists and is > 1MB
 - **Handler names**: `.tf` handler attribute matches the file inside the zip and the build script mapping
-- **Python version**: Same `3.13` across Lambda runtime, Dockerfile, and SSM Powertools path
+- **Python version**: Same `3.12` across Lambda runtime, Dockerfile, and SSM Powertools path
 - **Upstream version**: Same `v4.1.2` across `test.yml`, `build-lambda-packages.yml`, and `Makefile`
 - **Lambda Layer**: Both Lambda functions have `layers` configured, SSM data source exists, path format valid
-- **Build script**: Marker stripping, pip verification, `--without-hashes`, handler mappings all present
+- **Build script**: No sed workaround present (unnecessary with Python 3.12), pip verification, `--without-hashes`, handler mappings
 - **Git hygiene**: Lambda zips tracked, upstream/ excluded, no secrets in tracked files
 
 ---
@@ -633,13 +635,13 @@ provider "aws" {
 ```bash
 # Seed the SSM parameter that Terraform expects
 awslocal ssm put-parameter \
-  --name "/aws/service/powertools/python/x86_64/python3.13/latest" \
+  --name "/aws/service/powertools/python/x86_64/python3.12/latest" \
   --type "String" \
-  --value "arn:aws:lambda:us-east-1:017000801446:layer:AWSLambdaPowertoolsPythonV3-python313-x86_64:28"
+  --value "arn:aws:lambda:us-east-1:017000801446:layer:AWSLambdaPowertoolsPythonV3-python312-x86_64:28"
 
 # Verify
 awslocal ssm get-parameter \
-  --name "/aws/service/powertools/python/x86_64/python3.13/latest"
+  --name "/aws/service/powertools/python/x86_64/python3.12/latest"
 ```
 
 #### Test Lambda Invocation
@@ -648,11 +650,11 @@ awslocal ssm get-parameter \
 # Upload zip to LocalStack Lambda
 awslocal lambda create-function \
   --function-name test-log-parser \
-  --runtime python3.13 \
+  --runtime python3.12 \
   --handler log-parser.lambda_handler \
   --zip-file fileb://lambda/log_parser.zip \
   --role arn:aws:iam::000000000000:role/lambda-role \
-  --layers "arn:aws:lambda:us-east-1:017000801446:layer:AWSLambdaPowertoolsPythonV3-python313-x86_64:28"
+  --layers "arn:aws:lambda:us-east-1:017000801446:layer:AWSLambdaPowertoolsPythonV3-python312-x86_64:28"
 
 # Invoke
 awslocal lambda invoke \
@@ -739,9 +741,9 @@ localstack start -d
 
 # 2. Seed SSM parameter
 awslocal ssm put-parameter \
-  --name "/aws/service/powertools/python/x86_64/python3.13/latest" \
+  --name "/aws/service/powertools/python/x86_64/python3.12/latest" \
   --type "String" \
-  --value "arn:aws:lambda:us-east-1:017000801446:layer:AWSLambdaPowertoolsPythonV3-python313-x86_64:28"
+  --value "arn:aws:lambda:us-east-1:017000801446:layer:AWSLambdaPowertoolsPythonV3-python312-x86_64:28"
 
 # 3. Run existing test suite (Terraform + Lambda builds + integrity)
 make test-all
@@ -757,7 +759,7 @@ terraform plan
 # 6. Test Lambda invocation against LocalStack
 awslocal lambda create-function \
   --function-name test-log-parser \
-  --runtime python3.13 \
+  --runtime python3.12 \
   --handler log-parser.lambda_handler \
   --zip-file fileb://lambda/log_parser.zip \
   --role arn:aws:iam::000000000000:role/lambda-role
@@ -859,14 +861,13 @@ These are inherent constraints of testing without a real AWS environment. Each l
 | **Risk** | A real import failure could be masked if the error message happens to contain `botocore.exceptions`. |
 | **Mitigation** | The error classification is specific: only `NoRegionError`, `NoCredentialError`, and `EndpointConnectionError` are allowed. Any other error is FAIL. The key dependency import tests (backoff, jinja2, etc.) verify imports independently without the handler's module-level AWS calls. |
 
-#### 5. Poetry export marker stripping is a workaround
+#### ~~5. Poetry export marker stripping is a workaround~~ (RESOLVED)
 
 | Aspect | Detail |
 |--------|--------|
-| **What's missing** | The `sed` command strips all `python_version` environment markers from Poetry's exported requirements. This is a workaround for the version mismatch between upstream (`python ~3.12`) and our Docker image (`python 3.13`). |
-| **Risk** | If a dependency genuinely requires a specific Python version range that excludes 3.13, we'd install it anyway and it might fail at runtime. |
-| **Mitigation** | The pip install verification checks that packages were actually installed. The import tests verify packages load without errors. All upstream deps currently support Python 3.13. |
-| **Proper fix** | Match the Docker image Python version to upstream's constraint, or wait for upstream to update `python = "~3.12"` to include 3.13. |
+| **Status** | **Resolved.** The Docker image now uses Python 3.12, matching upstream's `python = "~3.12"` constraint. The `sed` marker stripping workaround is no longer needed because pip evaluates `; python_version == "3.12"` markers as true on Python 3.12. |
+| **Original issue** | The `sed` command stripped all `python_version` environment markers from Poetry's exported requirements. This was a workaround for the version mismatch between upstream (`python ~3.12`) and the Docker image (previously `python 3.13`). |
+| **Resolution** | Switched Docker image from Python 3.13 to Python 3.12 to match upstream's constraint exactly. |
 
 #### 6. `grep -oP` (Perl regex) may not exist in all environments
 
@@ -901,6 +902,7 @@ These are inherent constraints of testing without a real AWS environment. Each l
 | ~~Build validation silently passed on missing deps~~ | Import test now categorizes errors: runtime (PASS), known pkg (WARN), unknown (FAIL) |
 | ~~No pip install verification~~ | Build script checks `.dist-info` count after `pip install` |
 | ~~Poetry export hash warnings~~ | Added `--without-hashes` to export |
+| ~~Poetry export marker stripping workaround~~ | Switched to Python 3.12 to match upstream's `python = ~3.12` constraint — markers now evaluate correctly |
 
 ---
 
@@ -916,7 +918,7 @@ These are inherent constraints of testing without a real AWS environment. Each l
 | tflint warnings | Variable issues | Fix or ignore if intentional |
 | tfsec HIGH issues | Security concern | Fix before merge |
 | Lambda build fails | Missing upstream | Run `make clone-upstream` |
-| Dependency missing from zip | Python version markers | Build script strips markers (fixed in #801) |
+| Dependency missing from zip | Python version mismatch | Docker image uses Python 3.12 matching upstream (fixed in #801) |
 | `act` Docker-in-Docker fails | Nested Docker not supported | Use `--bind` flag or pre-build image |
 | Integrity test fails on version | Stale reference in a file | Search for old version with `grep -r "v4.0.3"` |
 

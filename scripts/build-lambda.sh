@@ -111,15 +111,6 @@ elif [[ -f "pyproject.toml" ]]; then
             exit 1
         }
     }
-    # Strip python_version environment markers to avoid version mismatch.
-    # Poetry adds markers like '; python_version == "3.12"' based on the
-    # upstream pyproject.toml constraint (python = "~3.12"). When the Docker
-    # build image runs a different Python version (e.g., 3.13), pip evaluates
-    # these markers and silently skips all packages. Stripping all
-    # python_version markers ensures pip installs dependencies regardless of
-    # build Python version. Handles ==, >=, <=, >, <, ~= operators and
-    # compound markers (e.g., '; python_version >= "3.8" and python_version < "3.13"').
-    sed -i 's/ *; *python_version[^;]*//g' "${BUILD_DIR}/requirements.txt"
     pip install -r "${BUILD_DIR}/requirements.txt" -t "${BUILD_DIR}" --quiet --no-cache-dir || {
         echo "ERROR: pip install failed"
         exit 1

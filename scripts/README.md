@@ -18,9 +18,9 @@ Defines the Docker container used to build Lambda packages. Uses the official AW
 ### Code Breakdown
 
 ```dockerfile
-FROM public.ecr.aws/lambda/python:3.13
+FROM public.ecr.aws/lambda/python:3.12
 ```
-**Line 1**: Base image from AWS ECR - the official Lambda Python 3.13 runtime image. This ensures all compiled dependencies (like C extensions) are compatible with the Lambda execution environment.
+**Line 1**: Base image from AWS ECR - the official Lambda Python 3.12 runtime image. This matches upstream's `python = ~3.12` constraint, ensuring Poetry dependency resolution and pip installs work without workarounds.
 
 ```dockerfile
 RUN dnf install -y zip unzip bc && \

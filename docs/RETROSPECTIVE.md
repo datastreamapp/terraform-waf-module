@@ -408,7 +408,7 @@ Track these pinned versions and review periodically:
 | Upstream WAF | v4.1.2 | `.github/workflows/build-lambda-packages.yml` | Monthly |
 | AWS Managed Rules | Version_1.4 | `main.tf:82` | Quarterly |
 | AWS Provider | >= 5.0 | `versions.tf` | Quarterly |
-| Python Runtime | 3.13 | `Dockerfile.lambda-builder` | Annually |
+| Python Runtime | 3.12 | `Dockerfile.lambda-builder` | Annually |
 | Lambda Powertools Layer | v3 (SSM latest) | `data.powertools-layer.tf` | Monthly |
 
 **Upstream Changelog:** https://github.com/aws-solutions/aws-waf-security-automations/blob/main/CHANGELOG.md
