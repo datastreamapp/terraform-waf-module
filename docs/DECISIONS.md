@@ -7,6 +7,7 @@ This document captures key technical and architectural decisions for the terrafo
 - [ADR-001: Python 3.12 to match upstream constraint](#adr-001-python-312-to-match-upstream-constraint)
 - [ADR-002: Lambda Powertools via Layer (SSM) instead of bundling in zip](#adr-002-lambda-powertools-via-layer-ssm-instead-of-bundling-in-zip)
 - [ADR-003: Build validation with Layer/Runtime package allowlists](#adr-003-build-validation-with-layerruntime-package-allowlists)
+- [ADR-004: Poetry export without hashes](#adr-004-poetry-export-without-hashes)
 
 ---
 
@@ -145,6 +146,45 @@ Replace the permissive fallback with strict validation:
 
 - If upstream adds new runtime-provided dependencies, they need to be added to the `RUNTIME_PACKAGES` array
 - This is documented in the Upstream Update Checklist in RETROSPECTIVE.md
+
+---
+
+## ADR-004: Poetry export without hashes
+
+**Date:** 2026-01-28
+**Status:** Accepted
+**Issue:** [#801](https://github.com/datastreamapp/issues/issues/801)
+
+### Context
+
+Poetry's `export` command includes `--hash` lines by default in the generated `requirements.txt`. These hashes enable pip to verify package integrity during install (supply chain security).
+
+However, `--without-hashes` is used in our build pipeline.
+
+### Decision
+
+Use `--without-hashes` in `poetry export`. Accept the tradeoff.
+
+### Rationale
+
+| Factor | With hashes | Without hashes |
+|--------|-------------|----------------|
+| Supply chain security | pip verifies package integrity | No verification |
+| Build reliability | Can fail if hash changes (e.g., PyPI re-upload) | More resilient |
+| Compatibility | Hash mode requires ALL deps to have hashes or none | No constraint |
+
+Why this is acceptable:
+
+1. **Controlled build environment** — builds run inside a Docker container (`public.ecr.aws/lambda/python:3.12`) pulled from AWS ECR, not an arbitrary environment
+2. **Pinned upstream** — we clone from a specific git tag (`v4.1.2`), so `pyproject.toml` and `poetry.lock` are fixed
+3. **Network isolation is not a goal** — pip already fetches from PyPI over HTTPS during the build; hashes add integrity checking but not confidentiality
+4. **pip-audit runs during CI** — known CVEs in dependencies are caught by `pip-audit` in the build workflow
+
+### Consequences
+
+- If supply chain verification becomes a requirement, re-enable hashes and ensure `poetry.lock` is present and up-to-date
+- The Docker base image and PyPI HTTPS transport provide baseline integrity
+- This decision should be revisited if the build moves to a less controlled environment
 
 ---
 
