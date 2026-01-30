@@ -1,4 +1,4 @@
-.PHONY: test test-all test-local test-lambda test-integrity validate fmt lint security build clean clone-upstream
+.PHONY: test test-all test-local test-lambda test-integrity validate fmt lint security build clean clone-upstream tag
 
 # Default test (quick - no Docker)
 test: validate fmt
@@ -85,3 +85,11 @@ clean:
 # Deep clean (including upstream)
 clean-all: clean
 	rm -rf upstream
+
+# Create release tag (usage: make tag v=4.1.0)
+tag:
+	@if [ -z "$(v)" ]; then echo "Usage: make tag v=4.1.0"; exit 1; fi
+	git checkout master && git pull
+	git tag -a "v$(v)" -m "Release v$(v)"
+	git push origin "v$(v)"
+	@echo "Tagged and pushed v$(v)"

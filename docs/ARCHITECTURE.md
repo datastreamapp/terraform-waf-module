@@ -167,6 +167,47 @@ flowchart LR
     linkStyle default stroke:#333,stroke-width:2px
 ```
 
+## Dependency Management
+
+This module does **not** maintain its own Python dependencies. All Lambda dependencies come from the upstream [aws-waf-security-automations](https://github.com/aws-solutions/aws-waf-security-automations) repository.
+
+### How it works
+
+```
+Upstream repo (pinned to git tag v4.1.2)
+  └── source/log_parser/
+  │     ├── pyproject.toml   ← declares dependencies (backoff, jinja2, etc.)
+  │     └── poetry.lock      ← pins exact versions
+  └── source/reputation_lists_parser/
+        ├── pyproject.toml
+        └── poetry.lock
+```
+
+During the Docker build, `scripts/build-lambda.sh` runs:
+
+1. `poetry export --without dev --without-hashes -f requirements.txt` — reads upstream's `pyproject.toml` + `poetry.lock` and produces a flat `requirements.txt`
+2. `pip install -r requirements.txt -t <build_dir>` — installs pinned dependencies into the zip staging directory
+3. Handler files and shared libs are copied from upstream source
+4. Everything is zipped into `lambda/*.zip`
+
+### What we control vs. what upstream controls
+
+| Component | Controlled by | Where defined |
+|-----------|--------------|---------------|
+| Lambda dependencies (backoff, jinja2, etc.) | **Upstream** | `source/*/pyproject.toml` + `poetry.lock` |
+| Python version | **Us** (matches upstream's constraint) | `Dockerfile.lambda-builder`, `lambda.*.tf` |
+| Build tools (poetry, pip-audit) | **Us** | `Dockerfile.lambda-builder` |
+| Lambda Layer (aws_lambda_powertools) | **AWS** (managed Layer) | `data.powertools-layer.tf` (SSM lookup) |
+| Terraform infrastructure | **Us** | `*.tf` files |
+
+### Implications
+
+- **Updating dependencies** requires updating the upstream git tag — we cannot add or remove Python packages independently
+- **Build tools** (poetry, poetry-plugin-export, pip-audit) are installed unpinned in the Dockerfile — see [ADR-004](DECISIONS.md#adr-004-poetry-export-without-hashes) for rationale
+- **`poetry.lock`** in upstream ensures reproducible installs regardless of when the build runs
+
+---
+
 ## Build Process Detail
 
 ```mermaid

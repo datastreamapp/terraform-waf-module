@@ -97,3 +97,16 @@ jobs:
             size=$(ls -lh "$zip" | awk '{print $5}')
             echo "| $(basename $zip) | $size | ✅ PASS |" >> $GITHUB_STEP_SUMMARY
           done
+
+  integrity:
+    name: System Integrity Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Run integrity tests
+        run: bash scripts/test-integrity.sh
