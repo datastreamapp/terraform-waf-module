@@ -59,7 +59,7 @@ jobs:
 
       - name: Clone upstream source
         run: |
-          git clone --depth 1 --branch v4.0.3 \
+          git clone --depth 1 --branch v4.1.2 \
             https://github.com/aws-solutions/aws-waf-security-automations.git upstream
 
       - name: Build Docker image

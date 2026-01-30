@@ -173,10 +173,11 @@ resource "aws_lambda_function" "log-parser" {
   source_code_hash = filebase64sha256("${path.module}/lambda/log_parser.zip")
   role             = aws_iam_role.log-parser.arn
   handler          = "log-parser.lambda_handler"
-  runtime          = "python3.13"
+  runtime          = "python3.12"
   memory_size      = 512
   timeout          = 300
   publish          = true
+  layers           = [data.aws_ssm_parameter.powertools_layer.value]
 
   dead_letter_config {
     target_arn = var.dead_letter_arn

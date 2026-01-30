@@ -21,6 +21,58 @@ This document captures lessons learned, process improvements, and team checklist
 
 ## Retrospectives
 
+### 2026-01-28: Incomplete Lambda Zip Packages (Issue #801)
+
+#### What Happened
+
+After deploying v4.0.0 (upstream v4.1.2) to development, the reputation-list Lambda failed with:
+`Runtime.ImportModuleError: No module named 'aws_lambda_powertools'`
+
+Both log-parser and reputation-list Lambdas are affected.
+
+#### Root Causes
+
+| Issue | Root Cause | Why It Was Missed |
+|-------|------------|-------------------|
+| pip skipped all dependencies due to Python version markers | Upstream `pyproject.toml` specifies `python = "~3.12"` (>=3.12.0, <3.13.0). Poetry export produces a requirements file where **every dependency** has the marker `; python_version == "3.12"`. When pip runs on Python 3.13, it evaluates these markers and skips every package. pip exits 0 because it successfully processed the file — it just installed nothing. | Poetry is doing the right thing by adding markers. The mismatch is the Docker image running Python 3.13 while upstream requires ~3.12. The build script doesn't verify pip actually installed any packages. |
+| Build validation import test silently passes | Test in build-lambda.sh falls through to a syntax check when imports fail, marking it as PASS even when critical runtime dependencies are missing | The fallback was designed for packages only available in the Lambda runtime (e.g., boto3), but it didn't distinguish between expected and unexpected import failures |
+| No Lambda Layer configured as defense-in-depth | AWS recommends providing `aws_lambda_powertools` via Lambda Layer as best practice, which would have caught this at runtime | Previous upstream versions didn't use `aws_lambda_powertools` |
+
+#### Investigation
+
+1. Error on dev: `Runtime.ImportModuleError: No module named 'aws_lambda_powertools'`
+2. Zip analysis: `aws_lambda_powertools`, `jinja2`, `aws-xray-sdk` all missing despite being listed in upstream `pyproject.toml`
+3. CI/CD logs (run #21362768728): Poetry export ran, pip install ran, both exited 0 — but pip never installed `aws-lambda-powertools` or `jinja2` (no `Collecting aws-lambda-powertools` in logs)
+4. Timing: pip install completed in <1 second — far too fast for real dependency installation
+5. **Root cause**: Poetry export produces requirements with `; python_version == "3.12"` markers on every dependency. pip on Python 3.13 evaluates these markers and skips all packages. The file is 18KB and non-empty — but pip installs nothing because `3.13 != 3.12`
+6. The build script doesn't verify pip actually installed any packages after running
+
+#### Fix Applied
+
+1. **Lambda Layer (defense-in-depth):** Added `data.powertools-layer.tf` using SSM Parameter Store to dynamically resolve the latest AWS Lambda Powertools Layer ARN. This provides `aws_lambda_powertools` and `aws-xray-sdk` as a managed Layer, which is AWS best practice regardless of what's in the zip.
+2. **Build validation improvement:** Import test now categorizes missing modules into runtime-provided (warn) and unknown (hard fail) instead of silently falling back to a syntax check.
+3. **Zip rebuild required:** The CI/CD pipeline must be re-triggered to produce complete zip artifacts with all dependencies from upstream `pyproject.toml`.
+
+#### Action Items
+
+- [x] Add AWS Lambda Powertools Layer via SSM data source
+- [x] Update both Lambda function resources with `layers` attribute
+- [x] Improve build validation to detect missing dependencies
+- [x] Update CHANGELOG.md, DECISIONS.md
+- [x] Add to Version Dependencies table
+- [ ] Rebuild Lambda zips via CI/CD pipeline
+- [ ] Deploy fix to dev and verify
+- [ ] Comment on issue #801 with corrected findings
+
+#### Process Improvements
+
+1. **Build script must verify pip installed packages** — after `pip install`, check that the build directory contains installed packages (not just handler files). The requirements file may be non-empty but pip can skip everything due to environment markers
+2. **Python version in Docker must match upstream constraint** — if upstream requires `python ~3.12`, either use Python 3.12.x in Docker, or strip environment markers from the exported requirements before pip install
+3. **Build validation must fail on missing dependencies** — the import test now fails on any unresolved import that isn't a known runtime-provided package (boto3, botocore)
+4. **Added to Upstream Update Checklist** — verify Python version compatibility between upstream `pyproject.toml` and Docker build image
+
+---
+
 ### 2026-01-23: Upstream Update & CI/CD Fix
 
 ### What Happened
@@ -300,6 +352,8 @@ When updating Lambda packages from upstream:
 - [ ] Select appropriate `version_bump`
 - [ ] Monitor workflow execution
 - [ ] Review generated PR
+- [ ] Verify rebuilt zips contain all dependencies from upstream `pyproject.toml`
+- [ ] Check if new upstream imports require Lambda Layers (e.g., `aws_lambda_powertools`)
 
 #### Post-Update
 - [ ] Verify Lambda zip sizes are reasonable
@@ -351,10 +405,11 @@ Track these pinned versions and review periodically:
 
 | Dependency | Current | Location | Check Frequency |
 |------------|---------|----------|-----------------|
-| Upstream WAF | v4.0.3 | `.github/workflows/build-lambda-packages.yml` | Monthly |
+| Upstream WAF | v4.1.2 | `.github/workflows/build-lambda-packages.yml` | Monthly |
 | AWS Managed Rules | Version_1.4 | `main.tf:82` | Quarterly |
 | AWS Provider | >= 5.0 | `versions.tf` | Quarterly |
-| Python Runtime | 3.13 | `Dockerfile.lambda-builder` | Annually |
+| Python Runtime | 3.12 | `Dockerfile.lambda-builder` | Annually |
+| Lambda Powertools Layer | v3 (SSM latest) | `data.powertools-layer.tf` | Monthly |
 
 **Upstream Changelog:** https://github.com/aws-solutions/aws-waf-security-automations/blob/main/CHANGELOG.md
 
@@ -383,4 +438,4 @@ Track these pinned versions and review periodically:
 
 ---
 
-Last Updated: 2026-01-23
+Last Updated: 2026-01-28

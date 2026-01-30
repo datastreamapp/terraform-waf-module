@@ -272,21 +272,16 @@ flowchart TB
 | `log_parser` | SNS (from S3 logs) | Parses WAF logs, blocks suspicious IPs |
 | `reputation_lists_parser` | CloudWatch (hourly) | Syncs external IP reputation lists |
 
-**Runtime:** Python 3.13 on Amazon Linux 2023
+**Runtime:** Python 3.12 on Amazon Linux 2023
 
-### Why Python 3.13 (not 3.14)?
-
-| Factor | Python 3.13 | Python 3.14 |
-|--------|-------------|-------------|
-| Upstream Compatibility | Closer to upstream's 3.12 | Untested |
-| Stability | Mature release | Bleeding edge |
-| Dependency Risk | Lower | Higher |
+### Why Python 3.12?
 
 The upstream [aws-waf-security-automations](https://github.com/aws-solutions/aws-waf-security-automations)
-repository specifies `python = ~3.12` in their pyproject.toml. Using Python 3.13 provides a balance between
-newer features and maintaining compatibility with upstream-tested dependencies.
+specifies `python = ~3.12` in their `pyproject.toml`. Using the same Python version ensures Poetry
+dependency resolution, pip installs, and runtime behavior all match upstream's tested configuration
+exactly — no workarounds needed.
 
-See [docs/CHANGELOG.md](docs/CHANGELOG.md) for detailed rationale.
+See [docs/DECISIONS.md](docs/DECISIONS.md) for detailed rationale.
 
 ## WAF Rules
 
@@ -339,7 +334,7 @@ Before triggering a build, check the upstream changelog for available versions:
 
 | Field | Description |
 |-------|-------------|
-| **Current Default** | `v4.0.3` (configured in workflow) |
+| **Current Default** | `v4.1.2` (configured in workflow) |
 | **Where to Check** | [Upstream CHANGELOG.md](https://github.com/aws-solutions/aws-waf-security-automations/blob/main/CHANGELOG.md) |
 
 ### Triggering Lambda Updates (GitHub Actions)
@@ -366,7 +361,7 @@ flowchart LR
 
 | Input | Description | Example |
 |-------|-------------|---------|
-| **upstream_ref** | Tag from upstream repo to build from | `v4.0.3`, `v4.1.0`, `v4.1.2` |
+| **upstream_ref** | Tag from upstream repo to build from | `v4.1.2` (default), `v4.1.0`, `v4.0.3` |
 | **version_bump** | How to bump this module's version | `none`, `patch`, `minor`, `major` |
 
 5. Click **Run workflow** to start the build
@@ -378,9 +373,9 @@ flowchart LR
 | Bump Type | When to Use | Example |
 |-----------|-------------|---------|
 | `none` | Testing build, no release planned | Local validation |
-| `patch` | Security updates, bug fixes from upstream | `v4.0.3` → `v4.0.4` security patch |
+| `patch` | Security updates, bug fixes from upstream | `v4.1.2` → `v4.1.3` security patch |
 | `minor` | New features, dependency updates | `v4.0.x` → `v4.1.0` feature release |
-| `major` | Breaking changes, Python runtime upgrade | Python 3.12 → 3.13 |
+| `major` | Breaking changes, Python runtime upgrade | Python 3.9 → 3.12 |
 
 ### Workflow Inputs Reference
 
@@ -389,8 +384,8 @@ The workflow is defined in `.github/workflows/build-lambda-packages.yml`:
 ```yaml
 inputs:
   upstream_ref:
-    description: 'Upstream repo tag (e.g., v4.0.3)'
-    default: 'v4.0.3'  # Update this to change default version
+    description: 'Upstream repo tag (e.g., v4.1.2)'
+    default: 'v4.1.2'  # Update this to change default version
   version_bump:
     description: 'Version bump type for this release'
     options: ['none', 'patch', 'minor', 'major']
@@ -402,7 +397,7 @@ inputs:
 
 ```bash
 # Clone upstream source
-git clone --depth 1 --branch v4.0.3 \
+git clone --depth 1 --branch v4.1.2 \
   https://github.com/aws-solutions/aws-waf-security-automations.git upstream
 
 # Build Docker image

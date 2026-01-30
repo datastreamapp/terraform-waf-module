@@ -103,7 +103,7 @@ elif [[ -f "pyproject.toml" ]]; then
         }
     fi
     echo "  Running poetry export..."
-    poetry export --without dev -f requirements.txt -o "${BUILD_DIR}/requirements.txt" 2>&1 || {
+    poetry export --without dev --without-hashes -f requirements.txt -o "${BUILD_DIR}/requirements.txt" 2>&1 || {
         echo "ERROR: Poetry export failed"
         echo "  Trying alternative: poetry export without --without flag..."
         poetry export -f requirements.txt -o "${BUILD_DIR}/requirements.txt" --without-hashes 2>&1 || {
@@ -115,6 +115,14 @@ elif [[ -f "pyproject.toml" ]]; then
         echo "ERROR: pip install failed"
         exit 1
     }
+    # Verify pip actually installed packages (not just handler files)
+    INSTALLED_COUNT=$(ls -d "${BUILD_DIR}"/*.dist-info 2>/dev/null | wc -l)
+    if [[ "$INSTALLED_COUNT" -eq 0 ]]; then
+        echo "ERROR: pip install completed but no packages were installed"
+        echo "  Check requirements.txt for environment markers or empty content"
+        exit 1
+    fi
+    echo "  Installed ${INSTALLED_COUNT} packages"
     rm -f "${BUILD_DIR}/requirements.txt"
 else
     echo "ERROR: No requirements.txt or pyproject.toml found in ${SOURCE_DIR}"
@@ -233,10 +241,59 @@ for lib in "${REQUIRED_LIBS[@]}"; do
     fi
 done
 
+# Test 5: All upstream dependencies present in zip
+# Parse non-dev dependencies from pyproject.toml and verify they were installed.
+# Translates PyPI names to Python import names (hyphens→underscores, case-lowered).
+echo "  Checking upstream dependencies..."
+UPSTREAM_DEPS=()
+if [[ -f "${SOURCE_DIR}/pyproject.toml" ]]; then
+    IN_DEPS=false
+    while IFS= read -r line; do
+        if [[ "$line" == "[tool.poetry.dependencies]" ]]; then
+            IN_DEPS=true
+            continue
+        fi
+        if [[ "$IN_DEPS" == true && "$line" =~ ^\[.* ]]; then
+            break
+        fi
+        if [[ "$IN_DEPS" == true && "$line" =~ ^([a-zA-Z0-9_-]+)\ *=.* ]]; then
+            DEP_NAME="${BASH_REMATCH[1]}"
+            # Skip python itself
+            [[ "$DEP_NAME" == "python" ]] && continue
+            UPSTREAM_DEPS+=("$DEP_NAME")
+        fi
+    done < "${SOURCE_DIR}/pyproject.toml"
+fi
+
+ZIP_LISTING="${OUTPUT_DIR}/${PACKAGE_NAME}_listing.txt"
+unzip -l "${OUTPUT_DIR}/${ZIP_NAME}" > "${ZIP_LISTING}" 2>/dev/null
+for dep in "${UPSTREAM_DEPS[@]}"; do
+    # Normalize: PyPI uses hyphens, Python/pip uses underscores in dist-info
+    DEP_NORMALIZED=$(echo "$dep" | tr '[:upper:]-' '[:lower:]_')
+    if grep -qi "${DEP_NORMALIZED}" "${ZIP_LISTING}"; then
+        echo "  PASS: Dependency '${dep}' found in zip"
+    else
+        echo "  FAIL: Dependency '${dep}' missing from zip"
+        echo "        Expected from upstream pyproject.toml"
+        rm -f "${ZIP_LISTING}"
+        exit 1
+    fi
+done
+rm -f "${ZIP_LISTING}"
+
+# Test 6: Minimum size sanity check (zip should be > 1MB with real dependencies)
+MIN_SIZE_BYTES=$((1 * 1024 * 1024))
+if [[ $ZIP_SIZE -gt $MIN_SIZE_BYTES ]]; then
+    echo "  PASS: Size ${SIZE_MB}MB exceeds 1MB minimum (dependencies present)"
+else
+    echo "  FAIL: Size ${SIZE_MB}MB is suspiciously small (<1MB) — dependencies may be missing"
+    exit 1
+fi
+
 echo ""
 echo "--- NEGATIVE TESTS ---"
 
-# Test 5: Zip integrity check
+# Test 7: Zip integrity check
 if unzip -t "${OUTPUT_DIR}/${ZIP_NAME}" > /dev/null 2>&1; then
     echo "  PASS: Zip integrity verified (not corrupted)"
 else
@@ -244,7 +301,7 @@ else
     exit 1
 fi
 
-# Test 6: No __pycache__ in zip
+# Test 8: No __pycache__ in zip
 if unzip -l "${OUTPUT_DIR}/${ZIP_NAME}" | grep -q "__pycache__"; then
     echo "  FAIL: __pycache__ found in zip (should be cleaned)"
     exit 1
@@ -252,7 +309,7 @@ else
     echo "  PASS: No __pycache__ in zip"
 fi
 
-# Test 7: No .pyc files in zip
+# Test 9: No .pyc files in zip
 if unzip -l "${OUTPUT_DIR}/${ZIP_NAME}" | grep -q "\.pyc"; then
     echo "  FAIL: .pyc files found in zip"
     exit 1
@@ -260,7 +317,64 @@ else
     echo "  PASS: No .pyc files in zip"
 fi
 
-# Test 8: Import validation (extract and test imports)
+# Test 10: No .dist-info directories in zip (should be cleaned)
+if unzip -l "${OUTPUT_DIR}/${ZIP_NAME}" | grep -q "\.dist-info/"; then
+    echo "  FAIL: .dist-info directories found in zip (should be cleaned)"
+    exit 1
+else
+    echo "  PASS: No .dist-info in zip"
+fi
+
+# Test 11: No test directories in zip
+if unzip -l "${OUTPUT_DIR}/${ZIP_NAME}" | grep -qE "(^|\s)(tests?)/"; then
+    echo "  FAIL: test directories found in zip (should be cleaned)"
+    exit 1
+else
+    echo "  PASS: No test directories in zip"
+fi
+
+# Test 12: No .egg-info directories in zip
+if unzip -l "${OUTPUT_DIR}/${ZIP_NAME}" | grep -q "\.egg-info/"; then
+    echo "  FAIL: .egg-info directories found in zip (should be cleaned)"
+    exit 1
+else
+    echo "  PASS: No .egg-info in zip"
+fi
+
+# Test 13: No dev dependencies leaked into zip
+DEV_PACKAGES=("pytest" "moto" "pytest_mock" "pytest_runner" "pytest_cov" "pytest_env" "freezegun")
+for dev_pkg in "${DEV_PACKAGES[@]}"; do
+    if unzip -l "${OUTPUT_DIR}/${ZIP_NAME}" | grep -qi "^.*${dev_pkg}.*\.py"; then
+        echo "  FAIL: Dev dependency '${dev_pkg}' found in zip (should not be bundled)"
+        exit 1
+    fi
+done
+echo "  PASS: No dev dependencies in zip"
+
+# Test 14: No source handler with wrong name (underscore version should be renamed to hyphen)
+if [[ -n "$SOURCE_HANDLER" && "$SOURCE_HANDLER" != "$HANDLER" ]]; then
+    if unzip -l "${OUTPUT_DIR}/${ZIP_NAME}" | grep -qF "$SOURCE_HANDLER"; then
+        echo "  FAIL: Original handler '${SOURCE_HANDLER}' still in zip (should be renamed to '${HANDLER}')"
+        exit 1
+    else
+        echo "  PASS: Handler correctly renamed from '${SOURCE_HANDLER}' to '${HANDLER}'"
+    fi
+fi
+
+# Test 15: lib/ directory has __init__.py or all required modules are importable
+if unzip -l "${OUTPUT_DIR}/${ZIP_NAME}" | grep -q "lib/"; then
+    LIB_PY_COUNT=$(unzip -l "${OUTPUT_DIR}/${ZIP_NAME}" | grep -c "lib/.*\.py$" || true)
+    if [[ "$LIB_PY_COUNT" -gt 0 ]]; then
+        echo "  PASS: lib/ directory contains ${LIB_PY_COUNT} Python files"
+    else
+        echo "  FAIL: lib/ directory exists but contains no Python files"
+        exit 1
+    fi
+fi
+
+# Test 16: Import validation (extract and test imports)
+echo ""
+echo "--- IMPORT TESTS ---"
 echo "  Testing imports..."
 TEMP_EXTRACT="/tmp/validate_${PACKAGE_NAME}"
 rm -rf "${TEMP_EXTRACT}"
@@ -270,18 +384,119 @@ unzip -q "${OUTPUT_DIR}/${ZIP_NAME}" -d "${TEMP_EXTRACT}"
 cd "${TEMP_EXTRACT}"
 HANDLER_MODULE="${HANDLER%.py}"
 
-# Test basic import (convert hyphens to underscores for Python import)
+# Known packages provided by Lambda runtime (WARN only — not available during build)
+RUNTIME_PACKAGES=("boto3" "botocore")
+
+# If handler has hyphens, copy it with underscores for import test
 IMPORT_MODULE="${HANDLER_MODULE//-/_}"
-if python3 -c "import sys; sys.path.insert(0, '.'); import ${IMPORT_MODULE}" 2>/dev/null; then
+if [[ "$HANDLER_MODULE" != "$IMPORT_MODULE" && -f "${HANDLER}" ]]; then
+    cp "${HANDLER}" "${IMPORT_MODULE}.py"
+fi
+if IMPORT_ERROR=$(python3 -c "import sys; sys.path.insert(0, '.'); import ${IMPORT_MODULE}" 2>&1); then
+    IMPORT_EXIT=0
+else
+    IMPORT_EXIT=1
+fi
+# Clean up copy
+if [[ "$HANDLER_MODULE" != "$IMPORT_MODULE" ]]; then
+    rm -f "${IMPORT_MODULE}.py" 2>/dev/null || true
+fi
+
+if [[ $IMPORT_EXIT -eq 0 ]]; then
     echo "  PASS: Handler module imports successfully"
 else
-    # Check if file exists and has valid syntax
-    if python3 -m py_compile "${HANDLER}" 2>/dev/null; then
-        echo "  PASS: Handler syntax is valid (imports may need Lambda environment)"
+    # Check if this is a runtime environment error (e.g., missing AWS region, credentials)
+    # These errors mean the code imported fine but hit AWS SDK calls at module level
+    if grep -qE "NoRegionError|NoCredentialError|EndpointConnectionError|botocore\.exceptions" <<< "$IMPORT_ERROR"; then
+        echo "  PASS: Handler imports resolve (runtime environment error expected during build)"
+    # Check for missing module errors
+    elif grep -q "No module named" <<< "$IMPORT_ERROR"; then
+        MISSING_MODULE=$(grep -oP "No module named '\K[^']+" <<< "$IMPORT_ERROR") || \
+        MISSING_MODULE=$(grep -oE "No module named '[^']+'$" <<< "$IMPORT_ERROR" | sed "s/No module named '//;s/'//")
+
+        if [[ -n "$MISSING_MODULE" ]]; then
+            # Check against known runtime packages
+            IS_RUNTIME=false
+            for pkg in "${RUNTIME_PACKAGES[@]}"; do
+                if [[ "$MISSING_MODULE" == "$pkg" || "$MISSING_MODULE" == "$pkg".* ]]; then
+                    IS_RUNTIME=true
+                    break
+                fi
+            done
+
+            if [[ "$IS_RUNTIME" == true ]]; then
+                echo "  WARN: '${MISSING_MODULE}' is provided by Lambda runtime (not available during build)"
+            else
+                echo "  FAIL: Handler has unresolved import '${MISSING_MODULE}'"
+                echo "        This dependency must be installed in the zip package."
+                echo "        Check pyproject.toml and the Poetry export step."
+                echo "        Error: ${IMPORT_ERROR}"
+                rm -rf "${TEMP_EXTRACT}"
+                exit 1
+            fi
+        fi
     else
-        echo "  WARN: Handler has syntax issues or missing dependencies"
+        echo "  FAIL: Handler import failed with unexpected error"
+        echo "        Error: ${IMPORT_ERROR}"
+        rm -rf "${TEMP_EXTRACT}"
+        exit 1
     fi
 fi
+
+# Test 17: Verify key upstream dependencies are importable (not just present in zip)
+echo "  Testing dependency imports..."
+KEY_IMPORTS=("backoff" "jinja2" "aws_xray_sdk" "urllib3")
+# Add package-specific imports
+if [[ "$PACKAGE_NAME" == "log_parser" ]]; then
+    KEY_IMPORTS+=("pyparsing")
+fi
+for dep_import in "${KEY_IMPORTS[@]}"; do
+    if python3 -c "import sys; sys.path.insert(0, '.'); import ${dep_import}" 2>/dev/null; then
+        echo "  PASS: import ${dep_import} succeeds"
+    else
+        echo "  FAIL: import ${dep_import} failed — dependency may be corrupt or incomplete"
+        rm -rf "${TEMP_EXTRACT}"
+        exit 1
+    fi
+done
+
+# Test 18: Verify shared lib files are importable
+echo "  Testing shared lib imports..."
+for lib in "${REQUIRED_LIBS[@]}"; do
+    LIB_MODULE="${lib%.py}"
+    if python3 -c "import sys; sys.path.insert(0, '.'); from lib import ${LIB_MODULE}" 2>/dev/null; then
+        echo "  PASS: from lib import ${LIB_MODULE} succeeds"
+    else
+        # Shared libs may import boto3 at module level — check for runtime errors
+        if LIB_ERR=$(python3 -c "import sys; sys.path.insert(0, '.'); from lib import ${LIB_MODULE}" 2>&1); then
+            : # should not reach here since the if above already failed
+        fi
+        if grep -qE "NoRegionError|NoCredentialError|EndpointConnectionError|botocore\.exceptions" <<< "$LIB_ERR"; then
+            echo "  PASS: lib/${LIB_MODULE} imports resolve (runtime environment error expected)"
+        elif grep -q "No module named" <<< "$LIB_ERR"; then
+            LIB_MISSING=$(grep -oE "No module named '[^']+'$" <<< "$LIB_ERR" | sed "s/No module named '//;s/'//" | head -1)
+            IS_RUNTIME=false
+            for pkg in "${RUNTIME_PACKAGES[@]}"; do
+                if [[ "$LIB_MISSING" == "$pkg" || "$LIB_MISSING" == "$pkg".* ]]; then
+                    IS_RUNTIME=true
+                    break
+                fi
+            done
+            if [[ "$IS_RUNTIME" == true ]]; then
+                echo "  WARN: lib/${LIB_MODULE} needs '${LIB_MISSING}' (Lambda runtime)"
+            else
+                echo "  FAIL: lib/${LIB_MODULE} has unresolved import '${LIB_MISSING}'"
+                rm -rf "${TEMP_EXTRACT}"
+                exit 1
+            fi
+        else
+            echo "  FAIL: lib/${LIB_MODULE} import failed unexpectedly"
+            echo "        Error: ${LIB_ERR}"
+            rm -rf "${TEMP_EXTRACT}"
+            exit 1
+        fi
+    fi
+done
 
 # Cleanup temp extraction
 rm -rf "${TEMP_EXTRACT}"

@@ -88,7 +88,7 @@ flowchart LR
 
     subgraph Build["Docker Build"]
         direction TB
-        Docker[("Python 3.13 Amazon Linux 2023")]
+        Docker[("Python 3.12 Amazon Linux 2023")]
         LP_Build[log_parser.zip]
         RP_Build[reputation_lists_parser.zip]
         Docker --> LP_Build --> RP_Build
@@ -266,12 +266,12 @@ flowchart LR
     end
 
     subgraph Result["Selected"]
-        Winner["Python 3.13"]
+        Winner["Python 3.12"]
     end
 
     P312 --> Compat
-    P313 --> Compat
-    P313 --> Stable
+    P312 --> Stable
+    P312 --> Risk
     P313 --> Risk
     P314 --> Risk
 
@@ -279,7 +279,7 @@ flowchart LR
     Stable --> Winner
     Risk --> Winner
 
-    style P313 fill:#28a745,stroke:#28a745,color:white
+    style P312 fill:#28a745,stroke:#28a745,color:white
     style Winner fill:#28a745,stroke:#28a745,color:white
     style P314 fill:#ffc107,stroke:#ffc107,color:black
 
@@ -349,7 +349,7 @@ This section provides traceability for all diagram elements to their source code
 | log_parser updates HTTP Flood IP Sets | `lambda.log-parser.tf:153-154` | `HTTPFloodSetIPV4.arn`, `HTTPFloodSetIPV6.arn` |
 | log_parser updates Scanners/Probes IP Sets | `lambda.log-parser.tf:106-107` | `ScannersProbesSetIPV4.arn`, `ScannersProbesSetIPV6.arn` |
 | reputation_lists_parser updates Reputation IP Sets | `lambda.reputation-list.tf:50-51` | `IPReputationListsSetIPV4.arn`, `IPReputationListsSetIPV6.arn` |
-| Python 3.13 runtime | `lambda.log-parser.tf:176`, `lambda.reputation-list.tf:94` | `runtime = "python3.13"` |
+| Python 3.12 runtime | `lambda.log-parser.tf:176`, `lambda.reputation-list.tf:94` | `runtime = "python3.12"` |
 
 #### External Resources (NOT Created by This Module)
 
@@ -419,7 +419,7 @@ This section provides traceability for all diagram elements to their source code
 | tflint run | `.github/workflows/test.yml:36-39` | `tflint --init && tflint` |
 | tfsec | `.github/workflows/test.yml:41-44` | `tfsec-action@v1.0.0, --minimum-severity HIGH` |
 | checkov | `.github/workflows/test.yml:46-52` | `checkov-action@v12, soft_fail: true` |
-| Clone upstream | `.github/workflows/test.yml:60-63` | `git clone ... v4.0.3` |
+| Clone upstream | `.github/workflows/test.yml:60-63` | `git clone ... v4.1.2` |
 | Docker build | `.github/workflows/test.yml:65-66` | `docker build -t lambda-builder` |
 | Test log_parser | `.github/workflows/test.yml:68-73` | `lambda-builder log_parser` |
 | Test reputation_lists | `.github/workflows/test.yml:75-80` | `lambda-builder reputation_lists_parser` |

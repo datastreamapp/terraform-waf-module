@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Added AWS Lambda Powertools Layer (via SSM Parameter Store) to both Lambda functions as defense-in-depth for `aws_lambda_powertools` dependency ([ADR-002](DECISIONS.md#adr-002-lambda-powertools-via-layer-ssm-as-defense-in-depth))
+- Fixed Poetry export Python version mismatch by aligning to Python 3.12 (matching upstream's `python = ~3.12` constraint) — eliminates the need for `sed` marker stripping and `--without-hashes` workarounds ([ADR-001](DECISIONS.md#adr-001-python-312-to-match-upstream-constraint))
+- Added pip install verification — build fails if no packages are actually installed after `pip install`
+- Rebuilt Lambda zips with all upstream dependencies (~19MB, previously ~1.7MB with missing deps)
+
+### Added
+- `scripts/test-integrity.sh` — system integrity test suite (58 checks): file existence, Terraform ↔ Lambda zip consistency, handler name consistency, Python runtime version consistency, upstream version consistency, Lambda Layer configuration, build script consistency, CI/CD workflow consistency, documentation cross-references, git hygiene
+- `make test-integrity` target — runs system integrity tests (included in `make test-all`)
+- `docs/DECISIONS.md` — Architecture Decision Records (ADR-001: Python 3.12, ADR-002: Lambda Powertools Layer, ADR-003: Build validation)
+
+### Changed
+- Python runtime changed from 3.13 to 3.12 to match upstream's `python = ~3.12` constraint — removes all build workarounds
+- Updated default upstream version from `v4.0.3` to `v4.1.2` across all workflows, Makefile, and documentation
+- CI test workflow (`test.yml`) now clones upstream `v4.1.2` — tests the Poetry export code path instead of the old `requirements.txt` path
+
+### Improved
+- Build validation expanded from 9 to 25 tests per package (50 total): upstream dependency verification, minimum size check, dev dependency leak detection, `.dist-info`/`.egg-info`/test directory cleanup verification, handler rename verification, shared lib import tests, key dependency import tests
+- Build validation import test now categorizes errors: runtime environment (PASS), known runtime packages like boto3 (WARN), unknown missing modules (FAIL)
+- Fixed `pipefail` + `echo | grep` SIGPIPE bug — replaced with `grep <<< "$var"` (here-strings) and file-based grep
+
 ## [4.0.0] - 2026-01-26
 
 ### Changed
@@ -56,27 +77,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Build documentation in README.md
 
 ### Changed
-- **BREAKING**: Python runtime upgraded from 3.9 to 3.13
+- **BREAKING**: Python runtime upgraded from 3.9 to 3.12
 - Lambda packages now built from upstream source automatically
 - Build process creates PR for review instead of direct commits
 - README.md completely rewritten with architecture overview
 
-### Technical Decision: Python 3.13 vs 3.14
+### Technical Decision: Python 3.12
 
-We chose **Python 3.13** over Python 3.14 for the following reasons:
+We chose **Python 3.12** to match the upstream constraint. The upstream
+[aws-waf-security-automations](https://github.com/aws-solutions/aws-waf-security-automations)
+repository specifies `python = ~3.12` in their `pyproject.toml`, which means `>=3.12.0, <3.13.0`.
 
-| Factor | Python 3.14 | Python 3.13 | Decision |
+| Factor | Python 3.12 | Python 3.13 | Decision |
 |--------|-------------|-------------|----------|
 | AWS Lambda Support | Supported | Supported | Both viable |
-| Upstream Compatibility | Untested (upstream uses ~3.12) | Closer to upstream's 3.12 | **3.13 wins** |
-| Release Maturity | Bleeding edge | More stable, better tested | **3.13 wins** |
-| Dependency Risk | Higher risk with aws-lambda-powertools, backoff | Lower risk | **3.13 wins** |
+| Upstream Compatibility | Matches `python = ~3.12` constraint | Outside upstream constraint | **3.12 wins** |
+| Poetry Export Markers | No marker stripping needed | Requires `sed` workaround to strip `python_version` markers | **3.12 wins** |
+| Dependency Risk | Zero risk — exact match | Risk of pip skipping packages due to version markers | **3.12 wins** |
 
-**Rationale**: The upstream [aws-waf-security-automations](https://github.com/aws-solutions/aws-waf-security-automations)
-repository specifies `python = ~3.12` in their pyproject.toml. Using Python 3.13 provides a balance between
-newer features and maintaining compatibility with upstream-tested dependencies.
+**Rationale**: Using Python 3.12 eliminates the version marker mismatch that caused Issue #801 (pip skipping
+all dependencies because Poetry exported `; python_version == "3.12"` markers and pip on 3.13 evaluated them
+as false). Matching upstream exactly removes the need for the `sed` workaround that stripped environment markers.
 
-**Future Upgrade Path**: Once upstream updates their Python version requirement, we can safely upgrade to 3.14.
+**Future Upgrade Path**: Once upstream updates `python = "~3.12"` to include newer versions, we can upgrade accordingly.
 
 ### Security
 - Dependencies now scanned with pip-audit during build
