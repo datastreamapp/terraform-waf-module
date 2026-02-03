@@ -187,6 +187,8 @@ echo "  Cleaned up build artifacts"
 #######################################
 echo "[7/8] Creating zip archive..."
 cd "${BUILD_DIR}"
+# Remove old zip first - zip -r updates existing archives, leaving stale entries
+rm -f "${OUTPUT_DIR}/${ZIP_NAME}"
 zip -r -q "${OUTPUT_DIR}/${ZIP_NAME}" . || {
     echo "ERROR: Failed to create zip"
     exit 1

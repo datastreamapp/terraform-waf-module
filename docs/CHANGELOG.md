@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed Poetry export Python version mismatch by aligning to Python 3.12 (matching upstream's `python = ~3.12` constraint) — eliminates the need for `sed` marker stripping and `--without-hashes` workarounds ([ADR-001](DECISIONS.md#adr-001-python-312-to-match-upstream-constraint))
 - Added pip install verification — build fails if no packages are actually installed after `pip install`
 - Rebuilt Lambda zips with all upstream dependencies (~19MB, previously ~1.7MB with missing deps)
+- Fixed stale artifacts persisting in Lambda zips (certifi-2020, urllib3-1.25.10, `__pycache__`, `.dist-info`):
+  - Added `findutils` package to Dockerfile — AWS Lambda base image doesn't include `find`, causing all cleanup commands to silently fail
+  - Added `rm -f` before zip creation — `zip -r` updates existing archives instead of replacing them
 
 ### Added
 - `scripts/test-integrity.sh` — system integrity test suite (58 checks): file existence, Terraform ↔ Lambda zip consistency, handler name consistency, Python runtime version consistency, upstream version consistency, Lambda Layer configuration, build script consistency, CI/CD workflow consistency, documentation cross-references, git hygiene
