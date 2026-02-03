@@ -90,6 +90,47 @@ for zip_name in "${EXPECTED_ZIPS[@]}"; do
     fi
 done
 
+# Check that zip files don't contain stale build artifacts
+echo ""
+echo "--- LAMBDA ZIP CLEANLINESS ---"
+
+for zip_name in "${EXPECTED_ZIPS[@]}"; do
+    zip="${REPO_ROOT}/lambda/${zip_name}"
+    [[ -f "$zip" ]] || continue
+    ZIP_LISTING=$(unzip -l "$zip" 2>/dev/null)
+
+    # No __pycache__ directories (should be cleaned by find command)
+    PYCACHE_COUNT=$(grep -c '__pycache__' <<< "$ZIP_LISTING" || true)
+    if [[ "$PYCACHE_COUNT" -eq 0 ]]; then
+        pass "${zip_name} has no __pycache__ directories"
+    else
+        fail "${zip_name} has ${PYCACHE_COUNT} __pycache__ entries — findutils missing or cleanup failed"
+    fi
+
+    # No .dist-info directories (should be cleaned by find command)
+    DISTINFO_COUNT=$(grep -c '\.dist-info' <<< "$ZIP_LISTING" || true)
+    if [[ "$DISTINFO_COUNT" -eq 0 ]]; then
+        pass "${zip_name} has no .dist-info directories"
+    else
+        fail "${zip_name} has ${DISTINFO_COUNT} .dist-info entries — findutils missing or cleanup failed"
+    fi
+
+    # No .pyc files (should be cleaned by find command)
+    PYC_COUNT=$(grep -c '\.pyc' <<< "$ZIP_LISTING" || true)
+    if [[ "$PYC_COUNT" -eq 0 ]]; then
+        pass "${zip_name} has no .pyc files"
+    else
+        fail "${zip_name} has ${PYC_COUNT} .pyc files — findutils missing or cleanup failed"
+    fi
+
+    # No 2020-era stale packages (indicates zip -r update instead of replace)
+    if grep -qE '(certifi-2020|urllib3-1\.25)' <<< "$ZIP_LISTING"; then
+        fail "${zip_name} contains stale 2020-era packages — old zip not deleted before rebuild"
+    else
+        pass "${zip_name} has no stale 2020-era packages"
+    fi
+done
+
 #######################################
 # 3. Handler name consistency
 #######################################
@@ -153,6 +194,13 @@ if [[ -f "$DOCKERFILE" ]]; then
         pass "Dockerfile base image = python:${DOCKER_PYTHON}"
     else
         fail "Dockerfile base image = python:${DOCKER_PYTHON} (expected ${EXPECTED_PYTHON})"
+    fi
+
+    # Dockerfile must have findutils for cleanup commands
+    if grep -q 'findutils' "$DOCKERFILE"; then
+        pass "Dockerfile installs findutils (required for find cleanup commands)"
+    else
+        fail "Dockerfile missing findutils — cleanup commands will silently fail"
     fi
 fi
 
@@ -285,6 +333,13 @@ if grep -q '\-\-without-hashes' "$BUILD_SCRIPT"; then
     pass "build-lambda.sh uses --without-hashes in poetry export"
 else
     warn "build-lambda.sh may produce hash warnings without --without-hashes"
+fi
+
+# Verify build script deletes old zip before creating new one (zip -r updates, doesn't replace)
+if grep -q 'rm -f.*ZIP_NAME' "$BUILD_SCRIPT"; then
+    pass "build-lambda.sh removes old zip before creating new one"
+else
+    fail "build-lambda.sh missing rm -f before zip — stale artifacts will persist"
 fi
 
 # Verify handler mappings match Terraform expectations
