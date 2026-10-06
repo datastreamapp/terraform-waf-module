@@ -33,6 +33,44 @@ variable "excluded_rules" {
   default = []
 }
 
+variable "path_rate_rules" {
+  description = "Extra per-address rate rules, each limited to one HTTP method and one URI path (optionally a query string fragment). Map key = rule name suffix (rule name is <name>wafRate<key>). Count mode only in this release. Window is the AWS default, 300 seconds. See docs/DECISIONS.md."
+  type = map(object({
+    priority       = number # 10-19, unique across entries
+    limit          = number # requests per 300 s per address; AWS minimum is 10
+    action         = string # "count" only in this release
+    method         = string # matched EXACTLY, for example "POST"
+    uri_path_regex = string # matched after URL_DECODE, NORMALIZE_PATH, LOWERCASE; 1-512 chars
+    query_contains = string # "" = no query condition; else CONTAINS match after URL_DECODE
+  }))
+  default = {}
+
+  validation {
+    condition     = alltrue([for r in values(var.path_rate_rules) : r.limit >= 10 && floor(r.limit) == r.limit])
+    error_message = "path_rate_rules: limit must be a whole number of 10 or more (AWS WAF minimum)."
+  }
+
+  validation {
+    condition     = alltrue([for r in values(var.path_rate_rules) : r.action == "count"])
+    error_message = "path_rate_rules: action must be \"count\". Block is a later release with its own review."
+  }
+
+  validation {
+    condition     = alltrue([for r in values(var.path_rate_rules) : r.priority >= 10 && r.priority <= 19 && floor(r.priority) == r.priority])
+    error_message = "path_rate_rules: priority must be a whole number from 10 to 19 (other numbers are used by the module's own rules)."
+  }
+
+  validation {
+    condition     = length(distinct([for r in values(var.path_rate_rules) : r.priority])) == length(var.path_rate_rules)
+    error_message = "path_rate_rules: each entry needs a unique priority."
+  }
+
+  validation {
+    condition     = alltrue([for r in values(var.path_rate_rules) : length(r.uri_path_regex) >= 1 && length(r.uri_path_regex) <= 512])
+    error_message = "path_rate_rules: uri_path_regex must be 1 to 512 characters."
+  }
+}
+
 //variable "rules" {
 //  type = list(map)
 //  default = []

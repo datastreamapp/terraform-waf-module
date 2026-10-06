@@ -340,6 +340,87 @@ resource "aws_wafv2_web_acl" "main" {
     }
   }
 
+  # Per-address rate rules scoped to one method and path (datastreamapp/issues#2252).
+  # Count only in this release; the 300 s window is the AWS default. See docs/DECISIONS.md.
+  dynamic "rule" {
+    for_each = var.path_rate_rules
+    content {
+      name     = "${local.name}wafRate${rule.key}"
+      priority = rule.value.priority
+      action {
+        count {}
+      }
+
+      visibility_config {
+        cloudwatch_metrics_enabled = true
+        metric_name                = "${local.name}wafRate${rule.key}"
+        sampled_requests_enabled   = true
+      }
+      statement {
+        rate_based_statement {
+          aggregate_key_type = "IP"
+          limit              = rule.value.limit
+
+          scope_down_statement {
+            and_statement {
+              statement {
+                byte_match_statement {
+                  field_to_match {
+                    method {}
+                  }
+                  positional_constraint = "EXACTLY"
+                  search_string         = rule.value.method
+                  text_transformation {
+                    priority = 0
+                    type     = "NONE"
+                  }
+                }
+              }
+
+              statement {
+                regex_match_statement {
+                  field_to_match {
+                    uri_path {}
+                  }
+                  regex_string = rule.value.uri_path_regex
+                  text_transformation {
+                    priority = 0
+                    type     = "URL_DECODE"
+                  }
+                  text_transformation {
+                    priority = 1
+                    type     = "NORMALIZE_PATH"
+                  }
+                  text_transformation {
+                    priority = 2
+                    type     = "LOWERCASE"
+                  }
+                }
+              }
+
+              dynamic "statement" {
+                for_each = rule.value.query_contains != "" ? [rule.value.query_contains] : []
+                content {
+                  byte_match_statement {
+                    field_to_match {
+                      query_string {}
+                    }
+                    positional_constraint = "CONTAINS"
+                    search_string         = statement.value
+                    text_transformation {
+                      priority = 0
+                      type     = "URL_DECODE"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
 
   /*dynamic "rule" {
     for_each = var.scannersProbesProtectionActivated ? [
