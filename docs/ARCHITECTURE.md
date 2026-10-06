@@ -141,10 +141,11 @@ flowchart LR
         T2["terraform init"]
         T3["terraform validate"]
         T4["terraform fmt -check"]
+        T4b["terraform test<br/>(mocked provider)"]
         T5["tflint"]
         T6["tfsec"]
         T7["checkov"]
-        T1 --> T2 --> T3 --> T4 --> T5 --> T6 --> T7
+        T1 --> T2 --> T3 --> T4 --> T4b --> T5 --> T6 --> T7
     end
 
     subgraph LambdaJob["Job: lambda"]
@@ -453,15 +454,18 @@ This section provides traceability for all diagram elements to their source code
 |------|-----------|----------|
 | Workflow triggers | `.github/workflows/test.yml:3-7` | `on: push, pull_request` |
 | Security permissions | `.github/workflows/test.yml:9-11` | `permissions: contents: read` |
-| Terraform Init | `.github/workflows/test.yml:24-25` | `terraform init -backend=false` |
-| Terraform Validate | `.github/workflows/test.yml:27-28` | `terraform validate` |
-| Terraform fmt | `.github/workflows/test.yml:30-31` | `terraform fmt -check -recursive` |
-| tflint setup | `.github/workflows/test.yml:33-34` | `setup-tflint@v4` |
-| tflint run | `.github/workflows/test.yml:36-39` | `tflint --init && tflint` |
-| tfsec | `.github/workflows/test.yml:41-44` | `tfsec-action@v1.0.0, --minimum-severity HIGH` |
-| checkov | `.github/workflows/test.yml:46-52` | `checkov-action@v12, soft_fail: true` |
-| Clone upstream | `.github/workflows/test.yml:60-63` | `git clone ... v4.1.2` |
-| Docker build | `.github/workflows/test.yml:65-66` | `docker build -t lambda-builder` |
-| Test log_parser | `.github/workflows/test.yml:68-73` | `lambda-builder log_parser` |
-| Test reputation_lists | `.github/workflows/test.yml:75-80` | `lambda-builder reputation_lists_parser` |
-| Summary output | `.github/workflows/test.yml:82-92` | `GITHUB_STEP_SUMMARY` |
+| Setup Terraform (pinned) | `.github/workflows/test.yml:21-25` | `setup-terraform@v3, terraform_version: 1.15.1` |
+| Terraform Init | `.github/workflows/test.yml:27-28` | `terraform init -backend=false` |
+| Terraform Validate | `.github/workflows/test.yml:30-31` | `terraform validate` |
+| Terraform fmt | `.github/workflows/test.yml:33-34` | `terraform fmt -check -recursive` |
+| Terraform Test | `.github/workflows/test.yml:36-37` | `terraform test` (runs `tests/*.tftest.hcl`) |
+| tflint setup | `.github/workflows/test.yml:39-40` | `setup-tflint@v4` |
+| tflint run | `.github/workflows/test.yml:42-45` | `tflint --init && tflint` |
+| tfsec | `.github/workflows/test.yml:47-50` | `tfsec-action@v1.0.0, --minimum-severity HIGH` |
+| checkov | `.github/workflows/test.yml:52-57` | `checkov-action@v12, soft_fail: true` |
+| Clone upstream | `.github/workflows/test.yml:66-69` | `git clone ... v4.1.2` |
+| Docker build | `.github/workflows/test.yml:71-72` | `docker build -t lambda-builder` |
+| Verify poetry-plugin-export | `.github/workflows/test.yml:74-80` | `poetry self show plugins` |
+| Test log_parser | `.github/workflows/test.yml:82-87` | `lambda-builder log_parser` |
+| Test reputation_lists | `.github/workflows/test.yml:89-94` | `lambda-builder reputation_lists_parser` |
+| Summary output | `.github/workflows/test.yml:96-105` | `GITHUB_STEP_SUMMARY` |

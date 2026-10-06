@@ -8,6 +8,7 @@ This document captures key technical and architectural decisions for the terrafo
 - [ADR-002: Lambda Powertools via Layer (SSM) instead of bundling in zip](#adr-002-lambda-powertools-via-layer-ssm-instead-of-bundling-in-zip)
 - [ADR-003: Build validation with Layer/Runtime package allowlists](#adr-003-build-validation-with-layerruntime-package-allowlists)
 - [ADR-004: Poetry export without hashes](#adr-004-poetry-export-without-hashes)
+- [ADR-005: Per-address path rate rules, Count mode only](#adr-005-per-address-path-rate-rules-count-mode-only)
 
 ---
 
@@ -185,6 +186,55 @@ Why this is acceptable:
 - If supply chain verification becomes a requirement, re-enable hashes and ensure `poetry.lock` is present and up-to-date
 - The Docker base image and PyPI HTTPS transport provide baseline integrity
 - This decision should be revisited if the build moves to a less controlled environment
+
+---
+
+## ADR-005: Per-address path rate rules, Count mode only
+
+**Date:** 2026-10-06
+**Status:** Accepted
+**Issue:** [datastreamapp/issues#2252](https://github.com/datastreamapp/issues/issues/2252)
+
+### Context
+
+The app has a per-email attempt counter on the recovery-code form. It has nothing per source address, so an attacker who rotates emails is never slowed down. Each recovery-code request holds a Lambda for at least 500 ms, and the onboard recovery send action for at least 1500 ms. The only rate rule in this module (`wafHttpFloodRateBasedRule`, priority 5) covers every path at 2000 requests per 5 minutes, far too high to protect one form. The module had no input that lets a caller add a rule.
+
+### Decision
+
+Add the `path_rate_rules` input (`variables.tf`). Each entry adds one rate-based rule (`main.tf`, the `dynamic "rule"` after the flood rule):
+
+- Aggregated by source IP (`aggregate_key_type = "IP"`). Not `FORWARDED_IP`: a client can set that header and pick its own key.
+- Scope-down: method EXACTLY `method`, AND the URI path matches `uri_path_regex` after `URL_DECODE`, `NORMALIZE_PATH`, `LOWERCASE` (the app accepts an upper-case locale and a percent-encoded path), AND, when set, the query string CONTAINS `query_contains` after `URL_DECODE`.
+- Priority 10 to 19 only, so a caller cannot collide with the module's own rules (0, 1, 3, 4, 5, 20, 30).
+- Action `count`.
+
+The first caller (the `edge` root in the infrastructure repo) covers only two forms: the recovery-code POST (`/{locale}/login/recovery-code`) and the `sendRecoveryCode` action on `/{locale}/onboard`. The other `/onboard` actions stay with datastreamapp/issues#1737.
+
+### Rationale
+
+**Count only.** Both rules use Count. Count stops nothing. AWS documents that a rate-based rule in Count mode "doesn't limit the rate of requests. It just counts the requests that are over the limit." So Count also does not show the normal peak per address; real peaks come from the WAF logs in Athena (`waf_logs`). Block is a later slice with its own plan review, where the human approves the limit and the English-only JSON 429 page (`RateLimitJsonBody`).
+
+**Why `action` accepts only `"count"`.** No block code ships without its own tests. The field exists now so the Block slice widens the validation instead of changing the type. Adding a required field later would break callers, and an optional field needs `optional()`, which needs a newer Terraform floor.
+
+**Fixed 300-second window.** The rule does not set `evaluation_window_sec`. The window is the AWS default, 300 seconds. That field was added during the AWS provider 5.x line (exact release not checked), and the module allows `aws >= 5.0`, so leaving it out avoids raising the provider floor.
+
+**Limit values.** The values are set by the caller, not this module. Starting values are guesses with no traffic data: 30 requests per 300 seconds per address in production and testing, and 10 (the AWS minimum) in development, so a short live probe shows over-limit hits. In the Block slice they are replaced by values from real WAF-log peaks (about 3 times the highest normal peak). Changing a limit resets the rule's counts.
+
+**Terraform version.** The module floor stays `required_version = ">= 1.0"`: nothing in the module code needs more. The new test (`tests/path_rate_rules.tftest.hcl`) uses `mock_provider`, which needs Terraform 1.7 or newer, so CI pins `terraform_version` in `.github/workflows/test.yml`.
+
+| Option | Pros | Cons |
+|--------|------|------|
+| Raise `requestThreshold` defaults per path | No new input | Not possible: the flood rule has no scope-down |
+| Two fixed rules in the module | Simple | Paths and limits are app-specific; every route change needs a module release |
+| **Generic `path_rate_rules` map** | One map entry per route, no module change for new routes | Callers must pick a free priority (validated 10 to 19) |
+
+### Consequences
+
+- **Function URL known limit.** The public app-ssr Lambda Function URL (authorization `NONE`, no origin access control on CloudFront) is reachable without CloudFront. Anyone with that URL skips the whole WAF, including these rules. Accepted by the human as a known limit; a follow-up ticket covers it.
+- **Slow lock-out gap.** About 1 request per 80 seconds per victim email stays far below any per-address limit, so this rule does not stop a slow lock-out of one account. It bounds Lambda abuse and mass email testing from one address. It does not replace the app's per-email counter.
+- **One ACL feeds five CloudFront resources** in the `edge` root. The rules count across all of them, and a mistake in the ACL affects all of them.
+- **Not checked offline:** WCU capacity (each rule is roughly 50 to 80 WCU, an estimate; a capacity error appears at apply, not plan), and whether AWS accepts each regex. Both show on the first apply.
+- Rollback: remove the entries from `path_rate_rules`. The rules disappear in one in-place ACL update. Count never stopped a request, so users see no change.
 
 ---
 

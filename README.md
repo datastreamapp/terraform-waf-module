@@ -313,8 +313,54 @@ Web ACL
 | `name` | Application name | `string` | required |
 | `defaultAction` | Default action (`ALLOW` or `DENY`) | `string` | `"DENY"` |
 | `logging_bucket` | S3 bucket for logs | `string` | required |
+| `path_rate_rules` | Extra per-address rate rules, each scoped to one method and one URI path (optionally a query string fragment). Count mode only. See below | `map(object)` | `{}` |
 
 See [variables.tf](variables.tf) for full list of inputs.
+
+### `path_rate_rules` (Count mode only)
+
+Each map entry adds one rate-based rule named `<name>wafRate<key>`, placed after the HTTP flood rule. The rule counts requests per source IP over the AWS default 300-second window. It only looks at requests that match all of these:
+
+- the HTTP method equals `method` exactly
+- the URI path matches `uri_path_regex` after `URL_DECODE`, `NORMALIZE_PATH` and `LOWERCASE`, in that order (so write the regex in lower case)
+- if `query_contains` is not `""`, the query string contains it after `URL_DECODE`
+
+The rule action is `count`. It never blocks a request. Leaving the input unset keeps the ACL rules exactly as before.
+
+| Field | Rule |
+|-------|------|
+| `priority` | Whole number 10 to 19, unique across entries (the module's own rules use 0, 1, 3, 4, 5, 20, 30) |
+| `limit` | Whole number, 10 or more (AWS minimum), requests per 300 seconds per IP |
+| `action` | `"count"` only in this release |
+| `method` | For example `"POST"` |
+| `uri_path_regex` | 1 to 512 characters |
+| `query_contains` | `""` for no query condition |
+
+```hcl
+module "waf" {
+  # ...
+  path_rate_rules = {
+    RecoveryCode = {
+      priority       = 10
+      limit          = 30
+      action         = "count"
+      method         = "POST"
+      uri_path_regex = "^/(en-ca|fr-ca)/login/recovery-code/?$"
+      query_contains = ""
+    }
+    OnboardRecoverySend = {
+      priority       = 11
+      limit          = 30
+      action         = "count"
+      method         = "POST"
+      uri_path_regex = "^/(en-ca|fr-ca)/onboard/?$"
+      query_contains = "/sendRecoveryCode"
+    }
+  }
+}
+```
+
+Why Count only, the fixed window and the known limits: [docs/DECISIONS.md](docs/DECISIONS.md#adr-005-per-address-path-rate-rules-count-mode-only) (ADR-005).
 
 ## Outputs
 
@@ -478,6 +524,8 @@ terraform-waf-module/
 |- scripts/
 |  |- Dockerfile.lambda-builder     # Build environment
 |  |- build-lambda.sh               # Build script
+|- tests/
+|  |- path_rate_rules.tftest.hcl    # Terraform test, mocked AWS provider (make test-terraform)
 |- lambda.log-parser.tf             # Lambda TF config
 |- lambda.reputation-list.tf        # Lambda TF config
 |- main.tf                          # WAF Web ACL

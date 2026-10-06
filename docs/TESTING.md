@@ -35,7 +35,7 @@ This document describes how to test the terraform-waf-module before deployment.
 
 | Tool | Required | Purpose | Install |
 |------|----------|---------|---------|
-| Terraform | Yes | Infrastructure validation | `brew install terraform` |
+| Terraform | Yes (1.7 or newer for `terraform test`) | Infrastructure validation and Terraform tests (`mock_provider` needs 1.7+) | `brew install terraform` |
 | Docker | Yes | Lambda builds + security scans | `brew install docker` |
 | AWS CLI | Optional | AWS credentials for plan | `brew install awscli` |
 | act | Optional | Run GitHub Actions locally | `brew install act` |
@@ -58,6 +58,9 @@ make test-all
 
 # System integrity only (no Docker)
 make test-integrity
+
+# Terraform tests only (mocked AWS provider, no credentials)
+make test-terraform
 ```
 
 ---
@@ -66,11 +69,12 @@ make test-integrity
 
 | Target | Tests | Docker | Description |
 |--------|-------|--------|-------------|
-| `make test` | 2 | No | Terraform validate + fmt |
-| `make test-local` | 2 + lint + security | Yes | Full validation without Lambda |
+| `make test` | 2 + 13 | No | Terraform validate + fmt + Terraform tests |
+| `make test-terraform` | 13 | No | Terraform tests in `tests/` (mocked AWS provider, plan only) |
+| `make test-local` | 2 + 13 + lint + security | Yes | Full validation without Lambda |
 | `make test-lambda` | 50 | Yes | Build and validate both Lambda zips (25 + 24) |
 | `make test-integrity` | 58 | No | Cross-file consistency, version alignment, git hygiene |
-| `make test-all` | **108+** | Yes | Everything: validate, fmt, lint, security, Lambda builds, integrity |
+| `make test-all` | **121+** | Yes | Everything: validate, fmt, Terraform tests, lint, security, Lambda builds, integrity |
 
 ### Important: validate vs plan
 
@@ -78,6 +82,7 @@ make test-integrity
 |---------|---------|---------------|---------------------|
 | `terraform validate` | Syntax & config check | No | No |
 | `terraform plan` | Pre-deployment preview | Yes | Yes (all required vars) |
+| `terraform test` | Plans the module against a mocked AWS provider and checks assertions | No | No (set in the test file) |
 
 **Why this matters:**
 - `make test` and `make test-all` use `terraform validate` — no AWS credentials or variable values needed
@@ -205,6 +210,29 @@ STATUS: PASSED
 | Validate | `terraform validate` | HCL syntax, resource references, type checking |
 | Format | `terraform fmt -check -recursive` | Consistent formatting |
 | Lint | tflint | Variable declarations, deprecated syntax, AWS-specific issues |
+| Terraform test | `terraform test` (`tests/path_rate_rules.tftest.hcl`) | The `path_rate_rules` rules as planned: names, priorities, limits, count action, scope-down, text transformations, input-unset regression, input validation |
+
+#### `tests/path_rate_rules.tftest.hcl` (13 runs)
+
+Uses `mock_provider "aws"` with `command = plan`, so it needs no AWS credentials and makes no AWS calls. Needs Terraform 1.7 or newer; CI pins `terraform_version` in `.github/workflows/test.yml`. The four `aws_iam_policy_document` data sources, `aws_region`, `aws_caller_identity` and `aws_ssm_parameter` are mocked with fixed values.
+
+| Run | Type | What it checks |
+|-----|------|----------------|
+| `input_unset_keeps_todays_rules` | Positive (regression) | Input unset: rule names and priorities equal today's five rules |
+| `input_unset_keeps_todays_rules_edge_switches` | Positive (regression) | Same with `uploadToS3Activated = true` (as the edge root sets it): six rules |
+| `payload_two_rules` | Positive | Two entries: exact name and priority map, limit, `IP` aggregation, count action and no other action, visibility config, method `EXACTLY POST`, path regex, transformations `URL_DECODE`, `NORMALIZE_PATH`, `LOWERCASE` in order, query `CONTAINS /sendRecoveryCode` after `URL_DECODE`, flood rule untouched |
+| `different_keys_different_names` | Positive | Two keys give two distinct rule names; limit 10 accepted |
+| `reject_limit_below_10` | Negative | Limit 9 rejected |
+| `reject_action_block` | Negative | Action `block` rejected (Count only) |
+| `reject_action_other` | Negative | Action `allow` rejected |
+| `reject_priority_below_range` | Negative | Priority 5 rejected |
+| `reject_priority_above_range` | Negative | Priority 20 rejected |
+| `reject_duplicate_priority` | Negative | Two entries with the same priority rejected |
+| `reject_empty_regex` | Negative | Empty `uri_path_regex` rejected |
+| `reject_regex_over_512` | Negative | 515-character regex rejected |
+| `accept_boundaries` | Positive (boundary) | Priority 19, limit 10 and a 512-character regex accepted |
+
+Plan-time limit: the rule set holds IP set ARNs that are unknown until apply, so `length()` or `distinct()` over the whole set cannot be asserted at plan time. The tests assert exact name maps and pick single rules by name instead.
 
 ### Security Tests
 
@@ -344,7 +372,7 @@ Recorded 2026-01-28 from local Docker builds on `feature/801-add-required-depend
 
 | Target | Description | Requirements |
 |--------|-------------|--------------|
-| `make test` | Quick tests (validate + fmt) | Terraform only |
+| `make test` | Quick tests (validate + fmt + Terraform tests) | Terraform 1.7+ only |
 | `make test-local` | Full tests except Lambda | Terraform + Docker |
 | `make test-all` | Complete test suite | Terraform + Docker |
 
@@ -358,6 +386,7 @@ Recorded 2026-01-28 from local Docker builds on `feature/801-add-required-depend
 | `make security` | Run tfsec + checkov | Yes |
 | `make test-lambda` | Build & test Lambda packages | Yes |
 | `make test-integrity` | System integrity checks | No |
+| `make test-terraform` | Terraform init + validate + `terraform test` (mocked AWS provider) | No |
 | `make build` | Build Docker image only | Yes |
 | `make clean` | Remove .terraform | No |
 | `make clean-all` | Remove .terraform + upstream | No |

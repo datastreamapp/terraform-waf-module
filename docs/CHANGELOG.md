@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- `requestThreshold` description no longer says AWS requires a limit of 2000 or more; AWS WAF rate-based rules accept 10 or more. Description only, no behaviour change ([#2252](https://github.com/datastreamapp/issues/issues/2252))
 - Added AWS Lambda Powertools Layer (via SSM Parameter Store) to both Lambda functions as defense-in-depth for `aws_lambda_powertools` dependency ([ADR-002](DECISIONS.md#adr-002-lambda-powertools-via-layer-ssm-as-defense-in-depth))
 - Fixed Poetry export Python version mismatch by aligning to Python 3.12 (matching upstream's `python = ~3.12` constraint) — eliminates the need for `sed` marker stripping and `--without-hashes` workarounds ([ADR-001](DECISIONS.md#adr-001-python-312-to-match-upstream-constraint))
 - Added pip install verification — build fails if no packages are actually installed after `pip install`
@@ -17,11 +18,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added `rm -f` before zip creation — `zip -r` updates existing archives instead of replacing them
 
 ### Added
+- `path_rate_rules` input (default `{}`): per-address rate-based rules, each scoped to one HTTP method and one URI path (path matched after `URL_DECODE`, `NORMALIZE_PATH`, `LOWERCASE`), with an optional query string condition. Count mode only, AWS default 300-second window, priorities 10 to 19. Leaving it unset changes nothing. Planned release `v4.2.0` ([#2252](https://github.com/datastreamapp/issues/issues/2252), [ADR-005](DECISIONS.md#adr-005-per-address-path-rate-rules-count-mode-only))
+- `tests/path_rate_rules.tftest.hcl`: Terraform test with a mocked AWS provider (13 runs, plan only, no AWS credentials)
+- `make test-terraform` target (also part of `make test`, `make test-local`, `make test-all`) and a Terraform Test step in `test.yml`
 - `scripts/test-integrity.sh` — system integrity test suite (58 checks): file existence, Terraform ↔ Lambda zip consistency, handler name consistency, Python runtime version consistency, upstream version consistency, Lambda Layer configuration, build script consistency, CI/CD workflow consistency, documentation cross-references, git hygiene
 - `make test-integrity` target — runs system integrity tests (included in `make test-all`)
 - `docs/DECISIONS.md` — Architecture Decision Records (ADR-001: Python 3.12, ADR-002: Lambda Powertools Layer, ADR-003: Build validation)
 
 ### Changed
+- `test.yml` pins `terraform_version: 1.15.1` on the terraform job's Setup Terraform step, because `terraform test` with `mock_provider` needs Terraform 1.7 or newer. The module's `required_version` stays `>= 1.0`
 - Python runtime changed from 3.13 to 3.12 to match upstream's `python = ~3.12` constraint — removes all build workarounds
 - Updated default upstream version from `v4.0.3` to `v4.1.2` across all workflows, Makefile, and documentation
 - CI test workflow (`test.yml`) now clones upstream `v4.1.2` — tests the Poetry export code path instead of the old `requirements.txt` path
