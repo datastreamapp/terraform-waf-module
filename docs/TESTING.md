@@ -69,12 +69,12 @@ make test-terraform
 
 | Target | Tests | Docker | Description |
 |--------|-------|--------|-------------|
-| `make test` | 2 + 28 | No | Terraform validate + fmt + Terraform tests |
-| `make test-terraform` | 28 | No | Terraform tests in `tests/` (mocked AWS provider, plan only) |
-| `make test-local` | 2 + 28 + lint + security | Yes | Full validation without Lambda |
+| `make test` | 2 + 41 | No | Terraform validate + fmt + Terraform tests |
+| `make test-terraform` | 41 | No | Terraform tests in `tests/` (mocked AWS provider, plan only) |
+| `make test-local` | 2 + 41 + lint + security | Yes | Full validation without Lambda |
 | `make test-lambda` | 50 | Yes | Build and validate both Lambda zips (25 + 24) |
 | `make test-integrity` | 58 | No | Cross-file consistency, version alignment, git hygiene |
-| `make test-all` | **136+** | Yes | Everything: validate, fmt, Terraform tests, lint, security, Lambda builds, integrity |
+| `make test-all` | **149+** | Yes | Everything: validate, fmt, Terraform tests, lint, security, Lambda builds, integrity |
 
 ### Important: validate vs plan
 
@@ -212,7 +212,7 @@ STATUS: PASSED
 | Lint | tflint | Variable declarations, deprecated syntax, AWS-specific issues |
 | Terraform test | `terraform test` (`tests/path_rate_rules.tftest.hcl`) | The `path_rate_rules` rules as planned: names, priorities, limits, count action, scope-down, text transformations, input-unset regression, input validation |
 
-#### `tests/path_rate_rules.tftest.hcl` (28 runs)
+#### `tests/path_rate_rules.tftest.hcl` (41 runs)
 
 Uses `mock_provider "aws"` with `command = plan`, so it needs no AWS credentials and makes no AWS calls. Needs Terraform 1.7 or newer; CI pins `terraform_version` in `.github/workflows/test.yml`. The four `aws_iam_policy_document` data sources, `aws_region`, `aws_caller_identity` and `aws_ssm_parameter` are mocked with fixed values.
 
@@ -220,7 +220,7 @@ Uses `mock_provider "aws"` with `command = plan`, so it needs no AWS credentials
 |-----|------|----------------|
 | `input_unset_keeps_todays_rules` | Positive (regression) | Input unset: rule names and priorities equal today's five rules |
 | `input_unset_keeps_todays_rules_edge_switches` | Positive (regression) | Same with `uploadToS3Activated = true` (as the edge root sets it): six rules |
-| `payload_two_rules` | Positive | Two entries: exact name and priority map, limit, `IP` aggregation, count action and no other action, visibility config, method `EXACTLY POST`, path regex, transformations `URL_DECODE`, `NORMALIZE_PATH_WIN`, `LOWERCASE` in order, query `CONTAINS /sendRecoveryCode` after `URL_DECODE`, flood rule untouched |
+| `payload_two_rules` | Positive | Two entries: exact name and priority map, limit, `IP` aggregation, count action and no other action, visibility config, method `EXACTLY POST` with only the `NONE` transformation (both rules), path regex, transformations `URL_DECODE`, `NORMALIZE_PATH_WIN`, `LOWERCASE` in order, query `CONTAINS /sendRecoveryCode` after `URL_DECODE`, flood rule untouched |
 | `different_keys_different_names` | Positive | Two keys give two distinct rule names; limit 10 accepted |
 | `reject_limit_below_10` | Negative | Limit 9 rejected |
 | `reject_action_block` | Negative | Action `block` rejected (Count only) |
@@ -229,8 +229,8 @@ Uses `mock_provider "aws"` with `command = plan`, so it needs no AWS credentials
 | `reject_priority_above_range` | Negative | Priority 20 rejected |
 | `reject_duplicate_priority` | Negative | Two entries with the same priority rejected |
 | `reject_empty_regex` | Negative | Empty `uri_path_regex` rejected |
-| `reject_regex_over_512` | Negative | 515-character regex rejected |
-| `accept_boundaries` | Positive (boundary) | Priority 19, limit 10 and a 512-character regex accepted |
+| `reject_regex_over_200` | Negative | 201-character regex rejected (AWS WAF quota: 200 characters per regex pattern) |
+| `accept_boundaries` | Positive (boundary) | Priority 19, limit 10 and a 200-character regex accepted |
 | `reject_method_lowercase` | Negative | Method `post` rejected |
 | `reject_method_mixedcase` | Negative | Method `Post` rejected |
 | `reject_method_empty` | Negative | Empty method rejected |
@@ -246,6 +246,19 @@ Uses `mock_provider "aws"` with `command = plan`, so it needs no AWS credentials
 | `reject_limit_above_max` | Negative | Limit 2,000,000,001 rejected |
 | `reject_query_over_200` | Negative | 201-character `query_contains` rejected |
 | `accept_limits_at_max` | Positive (boundary) | Limit 2,000,000,000 and a 200-character `query_contains` accepted |
+| `reject_priority_9` | Negative (boundary) | Priority 9, the first value below the range, rejected |
+| `accept_key_64` | Positive (boundary) | A 64-character key accepted, rule at priority 10 |
+| `reject_query_non_ascii` | Negative | `query_contains = "/sendé"` (not printable ASCII) rejected |
+| `accept_every_allowed_method` | Positive | All seven methods (`GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS`) accepted and used as the search string |
+| `reject_method_get_lowercase` | Negative | Method `get` rejected |
+| `reject_method_head_lowercase` | Negative | Method `head` rejected |
+| `reject_method_put_lowercase` | Negative | Method `put` rejected |
+| `reject_method_patch_lowercase` | Negative | Method `patch` rejected |
+| `reject_method_delete_lowercase` | Negative | Method `delete` rejected |
+| `reject_method_options_lowercase` | Negative | Method `options` rejected |
+| `reject_regex_literal_backslash` | Negative | Regex with a literal backslash (`^/en-ca\\login$`) rejected |
+| `reject_regex_literal_backslash_then_upper` | Negative | Regex `^/x\\S$` (literal backslash, then a literal `S`) rejected |
+| `accept_regex_escapes_not_literal_backslash` | Positive | Regex `^/x/\S+/\d+$` (escapes only) accepted and passed through |
 
 **What these tests do not cover.** `mock_provider` does not run the provider's own argument validators. The tests prove the module's wiring and the module's own `validation` blocks. They do not prove that the provider or AWS accepts the values. The caller's real plan is the first check of provider limits (the limit range on older provider versions, regex syntax, metric-name characters). AWS checks regex acceptance at the first deploy.
 

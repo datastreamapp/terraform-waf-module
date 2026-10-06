@@ -325,7 +325,7 @@ Each map entry adds one rate-based rule named `<name>wafRate<key>`, placed after
 - the URI path matches `uri_path_regex` after `URL_DECODE`, `NORMALIZE_PATH_WIN` and `LOWERCASE`, in that order (`NORMALIZE_PATH_WIN` also turns `\` into `/`; write the regex in lower case)
 - if `query_contains` is not `""`, the query string contains it after `URL_DECODE`
 
-The rule action is `count`. It never blocks a request. Leaving the input unset keeps the ACL rules exactly as before.
+The rule action is `count`. It never blocks a request; in this release it only counts. Leaving the input unset keeps the ACL rules exactly as before.
 
 | Field | Rule |
 |-------|------|
@@ -333,8 +333,8 @@ The rule action is `count`. It never blocks a request. Leaving the input unset k
 | `priority` | Whole number 10 to 19, unique across entries (the module's own rules use 0, 1, 3, 4, 5, 20, 30) |
 | `limit` | Whole number from 10 (AWS minimum) to 2,000,000,000, requests per 300 seconds per IP. Limits below 100 need hashicorp/aws 5.66.0 or newer (older 5.x releases reject them at plan) |
 | `action` | `"count"` only in this release |
-| `method` | Upper case: `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE` or `OPTIONS`, for example `"POST"` (WAF matches it exactly and case-sensitively) |
-| `uri_path_regex` | 1 to 512 characters. No upper-case letters outside escapes such as `\d` or `\S` (the path is lower-cased first, so an upper-case letter never matches) |
+| `method` | Any one of `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE` or `OPTIONS`, in upper case (WAF matches it exactly and case-sensitively). The first caller, the `edge` root, uses `"POST"` |
+| `uri_path_regex` | 1 to 200 characters (AWS WAF regex pattern quota). No upper-case letters outside escapes such as `\d` or `\S` (the path is lower-cased first, so an upper-case letter never matches). No literal backslash (`NORMALIZE_PATH_WIN` turns every `\` in the path into `/` first). Use `[a-z]` instead of `\p{L}`; named groups such as `(?P<Name>...)` are rejected because of the upper-case check |
 | `query_contains` | `""` for no query condition. Printable ASCII, at most 200 characters |
 
 ```hcl
