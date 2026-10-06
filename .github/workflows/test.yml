@@ -22,7 +22,7 @@ jobs:
         uses: hashicorp/setup-terraform@v3
         with:
           # terraform test with mock_provider needs Terraform >= 1.7
-          terraform_version: 1.15.1
+          terraform_version: "1.15.1"
 
       - name: Terraform Init
         run: terraform init -backend=false
