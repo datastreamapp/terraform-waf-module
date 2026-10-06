@@ -321,20 +321,21 @@ See [variables.tf](variables.tf) for full list of inputs.
 
 Each map entry adds one rate-based rule named `<name>wafRate<key>`, placed after the HTTP flood rule. The rule counts requests per source IP over the AWS default 300-second window. It only looks at requests that match all of these:
 
-- the HTTP method equals `method` exactly
-- the URI path matches `uri_path_regex` after `URL_DECODE`, `NORMALIZE_PATH` and `LOWERCASE`, in that order (so write the regex in lower case)
+- the HTTP method equals `method` exactly (case-sensitive)
+- the URI path matches `uri_path_regex` after `URL_DECODE`, `NORMALIZE_PATH_WIN` and `LOWERCASE`, in that order (`NORMALIZE_PATH_WIN` also turns `\` into `/`; write the regex in lower case)
 - if `query_contains` is not `""`, the query string contains it after `URL_DECODE`
 
 The rule action is `count`. It never blocks a request. Leaving the input unset keeps the ACL rules exactly as before.
 
 | Field | Rule |
 |-------|------|
+| map key | 1 to 64 letters or digits (it becomes part of the rule and metric name). At most 9 entries: AWS allows 10 rate-based rules per web ACL and the module's flood rule uses one |
 | `priority` | Whole number 10 to 19, unique across entries (the module's own rules use 0, 1, 3, 4, 5, 20, 30) |
-| `limit` | Whole number, 10 or more (AWS minimum), requests per 300 seconds per IP |
+| `limit` | Whole number from 10 (AWS minimum) to 2,000,000,000, requests per 300 seconds per IP. Limits below 100 need hashicorp/aws 5.66.0 or newer (older 5.x releases reject them at plan) |
 | `action` | `"count"` only in this release |
-| `method` | For example `"POST"` |
-| `uri_path_regex` | 1 to 512 characters |
-| `query_contains` | `""` for no query condition |
+| `method` | Upper case: `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE` or `OPTIONS`, for example `"POST"` (WAF matches it exactly and case-sensitively) |
+| `uri_path_regex` | 1 to 512 characters. No upper-case letters outside escapes such as `\d` or `\S` (the path is lower-cased first, so an upper-case letter never matches) |
+| `query_contains` | `""` for no query condition. Printable ASCII, at most 200 characters |
 
 ```hcl
 module "waf" {
@@ -359,6 +360,8 @@ module "waf" {
   }
 }
 ```
+
+**Known limits.** These rules count per single address. CloudFront serves IPv6 for these sites, and WAF counts each IPv6 address on its own with no way to group them, so an attacker who rotates through many IPv6 addresses is never over a per-address limit. This must be settled before any rule is switched to Block. The public app-ssr Function URL also skips the whole WAF.
 
 Why Count only, the fixed window and the known limits: [docs/DECISIONS.md](docs/DECISIONS.md#adr-005-per-address-path-rate-rules-count-mode-only) (ADR-005).
 

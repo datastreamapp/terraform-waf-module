@@ -69,12 +69,12 @@ make test-terraform
 
 | Target | Tests | Docker | Description |
 |--------|-------|--------|-------------|
-| `make test` | 2 + 13 | No | Terraform validate + fmt + Terraform tests |
-| `make test-terraform` | 13 | No | Terraform tests in `tests/` (mocked AWS provider, plan only) |
-| `make test-local` | 2 + 13 + lint + security | Yes | Full validation without Lambda |
+| `make test` | 2 + 28 | No | Terraform validate + fmt + Terraform tests |
+| `make test-terraform` | 28 | No | Terraform tests in `tests/` (mocked AWS provider, plan only) |
+| `make test-local` | 2 + 28 + lint + security | Yes | Full validation without Lambda |
 | `make test-lambda` | 50 | Yes | Build and validate both Lambda zips (25 + 24) |
 | `make test-integrity` | 58 | No | Cross-file consistency, version alignment, git hygiene |
-| `make test-all` | **121+** | Yes | Everything: validate, fmt, Terraform tests, lint, security, Lambda builds, integrity |
+| `make test-all` | **136+** | Yes | Everything: validate, fmt, Terraform tests, lint, security, Lambda builds, integrity |
 
 ### Important: validate vs plan
 
@@ -212,7 +212,7 @@ STATUS: PASSED
 | Lint | tflint | Variable declarations, deprecated syntax, AWS-specific issues |
 | Terraform test | `terraform test` (`tests/path_rate_rules.tftest.hcl`) | The `path_rate_rules` rules as planned: names, priorities, limits, count action, scope-down, text transformations, input-unset regression, input validation |
 
-#### `tests/path_rate_rules.tftest.hcl` (13 runs)
+#### `tests/path_rate_rules.tftest.hcl` (28 runs)
 
 Uses `mock_provider "aws"` with `command = plan`, so it needs no AWS credentials and makes no AWS calls. Needs Terraform 1.7 or newer; CI pins `terraform_version` in `.github/workflows/test.yml`. The four `aws_iam_policy_document` data sources, `aws_region`, `aws_caller_identity` and `aws_ssm_parameter` are mocked with fixed values.
 
@@ -220,7 +220,7 @@ Uses `mock_provider "aws"` with `command = plan`, so it needs no AWS credentials
 |-----|------|----------------|
 | `input_unset_keeps_todays_rules` | Positive (regression) | Input unset: rule names and priorities equal today's five rules |
 | `input_unset_keeps_todays_rules_edge_switches` | Positive (regression) | Same with `uploadToS3Activated = true` (as the edge root sets it): six rules |
-| `payload_two_rules` | Positive | Two entries: exact name and priority map, limit, `IP` aggregation, count action and no other action, visibility config, method `EXACTLY POST`, path regex, transformations `URL_DECODE`, `NORMALIZE_PATH`, `LOWERCASE` in order, query `CONTAINS /sendRecoveryCode` after `URL_DECODE`, flood rule untouched |
+| `payload_two_rules` | Positive | Two entries: exact name and priority map, limit, `IP` aggregation, count action and no other action, visibility config, method `EXACTLY POST`, path regex, transformations `URL_DECODE`, `NORMALIZE_PATH_WIN`, `LOWERCASE` in order, query `CONTAINS /sendRecoveryCode` after `URL_DECODE`, flood rule untouched |
 | `different_keys_different_names` | Positive | Two keys give two distinct rule names; limit 10 accepted |
 | `reject_limit_below_10` | Negative | Limit 9 rejected |
 | `reject_action_block` | Negative | Action `block` rejected (Count only) |
@@ -231,6 +231,23 @@ Uses `mock_provider "aws"` with `command = plan`, so it needs no AWS credentials
 | `reject_empty_regex` | Negative | Empty `uri_path_regex` rejected |
 | `reject_regex_over_512` | Negative | 515-character regex rejected |
 | `accept_boundaries` | Positive (boundary) | Priority 19, limit 10 and a 512-character regex accepted |
+| `reject_method_lowercase` | Negative | Method `post` rejected |
+| `reject_method_mixedcase` | Negative | Method `Post` rejected |
+| `reject_method_empty` | Negative | Empty method rejected |
+| `reject_method_misspelled` | Negative | Method `POTS` rejected |
+| `reject_regex_uppercase` | Negative | Regex with an upper-case literal (`EN-ca`) rejected |
+| `accept_regex_with_uppercase_escapes` | Positive | Regex whose only upper-case letters are in escapes (`\S`, `\W`, `\D`) accepted and passed through; method `GET` accepted |
+| `reject_key_with_space` | Negative | Key `Bad Key` rejected |
+| `reject_key_over_64` | Negative | 65-character key rejected |
+| `reject_ten_entries` | Negative | 10 entries rejected (10 rate-based rules per ACL, the flood rule uses one) |
+| `accept_nine_entries` | Positive (boundary) | 9 entries give 9 rules at priorities 10 to 18 |
+| `reject_limit_not_whole` | Negative | Limit 10.5 rejected |
+| `reject_priority_not_whole` | Negative | Priority 10.5 rejected |
+| `reject_limit_above_max` | Negative | Limit 2,000,000,001 rejected |
+| `reject_query_over_200` | Negative | 201-character `query_contains` rejected |
+| `accept_limits_at_max` | Positive (boundary) | Limit 2,000,000,000 and a 200-character `query_contains` accepted |
+
+**What these tests do not cover.** `mock_provider` does not run the provider's own argument validators. The tests prove the module's wiring and the module's own `validation` blocks. They do not prove that the provider or AWS accepts the values. The caller's real plan is the first check of provider limits (the limit range on older provider versions, regex syntax, metric-name characters). AWS checks regex acceptance at the first deploy.
 
 Plan-time limit: the rule set holds IP set ARNs that are unknown until apply, so `length()` or `distinct()` over the whole set cannot be asserted at plan time. The tests assert exact name maps and pick single rules by name instead.
 

@@ -454,7 +454,7 @@ This section provides traceability for all diagram elements to their source code
 |------|-----------|----------|
 | Workflow triggers | `.github/workflows/test.yml:3-7` | `on: push, pull_request` |
 | Security permissions | `.github/workflows/test.yml:9-11` | `permissions: contents: read` |
-| Setup Terraform (pinned) | `.github/workflows/test.yml:21-25` | `setup-terraform@v3, terraform_version: 1.15.1` |
+| Setup Terraform (pinned) | `.github/workflows/test.yml:21-25` | `setup-terraform@v3, terraform_version: "1.15.1"` |
 | Terraform Init | `.github/workflows/test.yml:27-28` | `terraform init -backend=false` |
 | Terraform Validate | `.github/workflows/test.yml:30-31` | `terraform validate` |
 | Terraform fmt | `.github/workflows/test.yml:33-34` | `terraform fmt -check -recursive` |

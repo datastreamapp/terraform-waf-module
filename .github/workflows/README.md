@@ -59,10 +59,10 @@ Clones the repository into the runner.
   uses: hashicorp/setup-terraform@v3
   with:
     # terraform test with mock_provider needs Terraform >= 1.7
-    terraform_version: 1.15.1
+    terraform_version: "1.15.1"
 ```
 
-Installs the Terraform CLI using HashiCorp's official action, pinned to `1.15.1`. The pin exists because the Terraform Test step uses `mock_provider`, which needs Terraform 1.7 or newer. The module itself still declares `required_version = ">= 1.0"` (`versions.tf`). The version is written without a `v` prefix so the upstream version check in `scripts/test-integrity.sh` (which looks for `v4.1.2`) is not affected.
+Installs the Terraform CLI using HashiCorp's official action, pinned to `"1.15.1"` (quoted, so YAML always reads it as a string; an unquoted `1.20` would become the number 1.2). The pin exists because the Terraform Test step uses `mock_provider`, which needs Terraform 1.7 or newer. The module itself still declares `required_version = ">= 1.0"` (`versions.tf`). The version is written without a `v` prefix so the upstream version check in `scripts/test-integrity.sh` (which looks for `v4.1.2`) is not affected.
 
 #### Step: Terraform Init (Lines 27-28)
 
@@ -109,7 +109,7 @@ Verifies all `.tf` files are properly formatted. Flags:
   run: terraform test
 ```
 
-Runs every `tests/*.tftest.hcl` file. Today that is `tests/path_rate_rules.tftest.hcl` (13 runs). The tests use `mock_provider "aws"` and `command = plan`, so they need no AWS credentials and make no AWS calls. They check the `path_rate_rules` rules as planned (names, priorities, limits, count action, scope-down, text transformations), that leaving the input unset keeps today's rules, and that bad input is rejected. Run locally with `make test-terraform`. See `docs/TESTING.md`.
+Runs every `tests/*.tftest.hcl` file. Today that is `tests/path_rate_rules.tftest.hcl` (28 runs). The tests use `mock_provider "aws"` and `command = plan`, so they need no AWS credentials and make no AWS calls. They check the `path_rate_rules` rules as planned (names, priorities, limits, count action, scope-down, text transformations), that leaving the input unset keeps today's rules, and that bad input is rejected by the module's own validation. The mocked provider does not run the provider's argument checks; the caller's real plan is the first place those run. Run locally with `make test-terraform`. See `docs/TESTING.md`.
 
 #### Step: Setup tflint (Lines 39-40)
 

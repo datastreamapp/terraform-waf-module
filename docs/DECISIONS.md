@@ -204,9 +204,11 @@ The app has a per-email attempt counter on the recovery-code form. It has nothin
 Add the `path_rate_rules` input (`variables.tf`). Each entry adds one rate-based rule (`main.tf`, the `dynamic "rule"` after the flood rule):
 
 - Aggregated by source IP (`aggregate_key_type = "IP"`). Not `FORWARDED_IP`: a client can set that header and pick its own key.
-- Scope-down: method EXACTLY `method`, AND the URI path matches `uri_path_regex` after `URL_DECODE`, `NORMALIZE_PATH`, `LOWERCASE` (the app accepts an upper-case locale and a percent-encoded path), AND, when set, the query string CONTAINS `query_contains` after `URL_DECODE`.
+- Scope-down: method EXACTLY `method`, AND the URI path matches `uri_path_regex` after `URL_DECODE`, `NORMALIZE_PATH_WIN`, `LOWERCASE` (the app accepts an upper-case locale and a percent-encoded path, and its URL parser turns `\` into `/`; `NORMALIZE_PATH_WIN` does the same at the same WCU cost as `NORMALIZE_PATH`), AND, when set, the query string CONTAINS `query_contains` after `URL_DECODE`.
 - Priority 10 to 19 only, so a caller cannot collide with the module's own rules (0, 1, 3, 4, 5, 20, 30).
+- At most 9 entries. AWS allows 10 rate-based rules per web ACL, and the flood rule uses one.
 - Action `count`.
+- Input checks that stop a rule which would apply cleanly but count nothing: `method` must be an upper-case HTTP method (byte match is case-sensitive), and `uri_path_regex` must not hold an upper-case letter outside an escape (the path is lower-cased first). The map key must be 1 to 64 letters or digits, `limit` 10 to 2,000,000,000, `query_contains` at most 200 printable ASCII characters.
 
 The first caller (the `edge` root in the infrastructure repo) covers only two forms: the recovery-code POST (`/{locale}/login/recovery-code`) and the `sendRecoveryCode` action on `/{locale}/onboard`. The other `/onboard` actions stay with datastreamapp/issues#1737.
 
@@ -216,9 +218,9 @@ The first caller (the `edge` root in the infrastructure repo) covers only two fo
 
 **Why `action` accepts only `"count"`.** No block code ships without its own tests. The field exists now so the Block slice widens the validation instead of changing the type. Adding a required field later would break callers, and an optional field needs `optional()`, which needs a newer Terraform floor.
 
-**Fixed 300-second window.** The rule does not set `evaluation_window_sec`. The window is the AWS default, 300 seconds. That field was added during the AWS provider 5.x line (exact release not checked), and the module allows `aws >= 5.0`, so leaving it out avoids raising the provider floor.
+**Fixed 300-second window.** The rule does not set `evaluation_window_sec`. The window is the AWS default, 300 seconds. No caller needs another window, and Count does not depend on it.
 
-**Limit values.** The values are set by the caller, not this module. Starting values are guesses with no traffic data: 30 requests per 300 seconds per address in production and testing, and 10 (the AWS minimum) in development, so a short live probe shows over-limit hits. In the Block slice they are replaced by values from real WAF-log peaks (about 3 times the highest normal peak). Changing a limit resets the rule's counts.
+**Limit values.** The values are set by the caller, not this module. Limits below 100 need hashicorp/aws 5.66.0 or newer: provider releases 5.0.0 to 5.65.0 reject them at plan. The module still allows `aws >= 5.0`; the only caller locks 6.47.0 and CI uses 6.28.0. Starting values are guesses with no traffic data: 30 requests per 300 seconds per address in production and testing, and 10 (the AWS minimum) in development, so a short live probe shows over-limit hits. In the Block slice they are replaced by values from real WAF-log peaks (about 3 times the highest normal peak). Changing a limit resets the rule's counts.
 
 **Terraform version.** The module floor stays `required_version = ">= 1.0"`: nothing in the module code needs more. The new test (`tests/path_rate_rules.tftest.hcl`) uses `mock_provider`, which needs Terraform 1.7 or newer, so CI pins `terraform_version` in `.github/workflows/test.yml`.
 
@@ -231,9 +233,14 @@ The first caller (the `edge` root in the infrastructure repo) covers only two fo
 ### Consequences
 
 - **Function URL known limit.** The public app-ssr Lambda Function URL (authorization `NONE`, no origin access control on CloudFront) is reachable without CloudFront. Anyone with that URL skips the whole WAF, including these rules. Accepted by the human as a known limit; a follow-up ticket covers it.
+- **IPv6 gap (must be settled before Block).** CloudFront IPv6 is on for every distribution in the `edge` root (module `terraform-public-static-assets-module`, `cloudfront.tf:7` `is_ipv6_enabled = true`), and the public AAAA records resolve. WAF counts each IPv6 address on its own and cannot group them (no prefix option). A home connection or a cheap server usually gets a large IPv6 block, so an attacker who uses a new address for each request is never over a per-address limit. In Count mode this hides abuse from the signal. In Block it would stop no IPv6-capable attacker. This is a known limit; the Block slice must settle it (for example turn IPv6 off for these distributions, add a control that does not depend on the address, or the human accepts it in writing).
 - **Slow lock-out gap.** About 1 request per 80 seconds per victim email stays far below any per-address limit, so this rule does not stop a slow lock-out of one account. It bounds Lambda abuse and mass email testing from one address. It does not replace the app's per-email counter.
 - **One ACL feeds five CloudFront resources** in the `edge` root. The rules count across all of them, and a mistake in the ACL affects all of them.
-- **Not checked offline:** WCU capacity (each rule is roughly 50 to 80 WCU, an estimate; a capacity error appears at apply, not plan), and whether AWS accepts each regex. Both show on the first apply.
+- **A zero metric does not mean healthy.** In Count mode the rule's CloudWatch metric moves only for requests over the limit. A rule that matches nothing (wrong path, for example) also reads zero. Only the live probe proves a rule matches.
+- **Capacity (WCU).** Estimate about 37 WCU for the RecoveryCode rule and about 57 for OnboardRecoverySend, about 94 in total (about 114 if the `NONE` transformation is billed). Going over 1,500 WCU does not cause an error: the ACL moves to a higher price tier with no warning. Only above 5,000 does apply fail. The managed CommonRuleSet alone is 700, so the headroom is unknown. Before the first apply (chunk B), read the live value, for example `terraform state show module.waf.aws_wafv2_web_acl.main | grep capacity` (a state read the human approves).
+- **Quota.** AWS allows 10 rate-based rules per web ACL. The flood rule uses one, so `path_rate_rules` is capped at 9 entries.
+- **Checked at plan vs apply.** The real provider checks regex syntax (Go syntax) and the metric-name characters at the caller's `terraform plan`. AWS's own regex acceptance (a PCRE subset, and a possible 200-character limit per regex pattern, not confirmed) is only checked at apply. The module's tests use a mocked provider and do not run those provider checks.
+- **Sampled requests** are on, as for every rule in this ACL. The console sample shows request headers, including cookies, for about three hours to anyone with `wafv2:GetSampledRequests`. Not new, but these are sensitive routes; the Block slice may turn sampling off for them.
 - Rollback: remove the entries from `path_rate_rules`. The rules disappear in one in-place ACL update. Count never stopped a request, so users see no change.
 
 ---
