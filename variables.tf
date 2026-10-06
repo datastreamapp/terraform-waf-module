@@ -34,20 +34,20 @@ variable "excluded_rules" {
 }
 
 variable "path_rate_rules" {
-  description = "Extra per-address rate rules, each limited to one HTTP method and one URI path (optionally a query string fragment). Map key = rule name suffix (rule name is <name>wafRate<key>). Count mode only in this release. Window is the AWS default, 300 seconds. See docs/DECISIONS.md."
+  description = "Extra per-address rate rules, each limited to one HTTP method and one URI path (optionally a query string fragment). Map key = rule name suffix (rule name is <name>wafRate<key>). At most 9 entries (AWS allows 10 rate-based rules per web ACL; the flood rule uses one). Count mode only in this release. Window is the AWS default, 300 seconds. See docs/DECISIONS.md."
   type = map(object({
     priority       = number # 10-19, unique across entries
-    limit          = number # requests per 300 s per address; AWS minimum is 10
+    limit          = number # requests per 300 s per address; 10 to 2,000,000,000 (below 100 needs hashicorp/aws >= 5.66.0)
     action         = string # "count" only in this release
-    method         = string # matched EXACTLY, for example "POST"
-    uri_path_regex = string # matched after URL_DECODE, NORMALIZE_PATH, LOWERCASE; 1-512 chars
-    query_contains = string # "" = no query condition; else CONTAINS match after URL_DECODE
+    method         = string # upper-case HTTP method, matched EXACTLY and case-sensitively, for example "POST"
+    uri_path_regex = string # matched after URL_DECODE, NORMALIZE_PATH_WIN, LOWERCASE; 1-512 chars; no upper-case letters outside escapes
+    query_contains = string # "" = no query condition; else CONTAINS match after URL_DECODE; printable ASCII, max 200
   }))
   default = {}
 
   validation {
-    condition     = alltrue([for r in values(var.path_rate_rules) : r.limit >= 10 && floor(r.limit) == r.limit])
-    error_message = "path_rate_rules: limit must be a whole number of 10 or more (AWS WAF minimum)."
+    condition     = alltrue([for r in values(var.path_rate_rules) : r.limit >= 10 && r.limit <= 2000000000 && floor(r.limit) == r.limit])
+    error_message = "path_rate_rules: limit must be a whole number from 10 (AWS WAF minimum) to 2000000000."
   }
 
   validation {
@@ -68,6 +68,34 @@ variable "path_rate_rules" {
   validation {
     condition     = alltrue([for r in values(var.path_rate_rules) : length(r.uri_path_regex) >= 1 && length(r.uri_path_regex) <= 512])
     error_message = "path_rate_rules: uri_path_regex must be 1 to 512 characters."
+  }
+
+  validation {
+    # Remove each escape pair (a backslash and the next character, so \S or \D
+    # are allowed), then look for an upper-case letter. The path is lower-cased
+    # before the match, so an upper-case literal could never match.
+    condition     = alltrue([for r in values(var.path_rate_rules) : !can(regex("[A-Z]", replace(r.uri_path_regex, "/\\\\./", "")))])
+    error_message = "path_rate_rules: uri_path_regex must not contain upper-case letters outside escapes such as \\d or \\S. The path is lower-cased before the match, so an upper-case letter never matches."
+  }
+
+  validation {
+    condition     = alltrue([for r in values(var.path_rate_rules) : contains(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], r.method)])
+    error_message = "path_rate_rules: method must be an upper-case HTTP method such as \"POST\" (WAF matches it exactly and case-sensitively)."
+  }
+
+  validation {
+    condition     = alltrue([for k in keys(var.path_rate_rules) : can(regex("^[A-Za-z0-9]{1,64}$", k))])
+    error_message = "path_rate_rules: each key must be 1 to 64 letters or digits (it becomes part of the WAF rule and metric name)."
+  }
+
+  validation {
+    condition     = length(var.path_rate_rules) <= 9
+    error_message = "path_rate_rules: at most 9 entries. AWS allows 10 rate-based rules per web ACL and the module's flood rule uses one."
+  }
+
+  validation {
+    condition     = alltrue([for r in values(var.path_rate_rules) : can(regex("^[ -~]{0,200}$", r.query_contains))])
+    error_message = "path_rate_rules: query_contains must be printable ASCII, at most 200 characters (AWS byte match limit)."
   }
 }
 
