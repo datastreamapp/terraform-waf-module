@@ -1,0 +1,408 @@
+# Tests for the path_rate_rules input (datastreamapp/issues#2252).
+#
+# Runs fully offline: the AWS provider is mocked, every run is `command = plan`,
+# and no credentials or AWS calls are needed. Needs Terraform 1.7 or newer
+# (mock_provider). Run with `make test-terraform` or `terraform test`.
+#
+# The ACL's `rule` blocks are a set, so each assertion picks one rule by name
+# and checks the values it carries, not only that a rule exists.
+
+mock_provider "aws" {
+  mock_data "aws_region" {
+    defaults = {
+      name   = "us-east-1"
+      region = "us-east-1"
+    }
+  }
+
+  mock_data "aws_caller_identity" {
+    defaults = {
+      account_id = "123456789012"
+    }
+  }
+
+  mock_data "aws_ssm_parameter" {
+    defaults = {
+      value = "arn:aws:lambda:us-east-1:017000801446:layer:AWSLambdaPowertoolsPythonV3-python312-x86_64:1"
+    }
+  }
+
+  # Four aws_iam_policy_document data sources (main.tf x2, lambda.log-parser.tf,
+  # lambda.reputation-list.tf). A valid policy keeps any JSON check happy.
+  mock_data "aws_iam_policy_document" {
+    defaults = {
+      json = "{\"Version\":\"2012-10-17\",\"Statement\":[]}"
+    }
+  }
+}
+
+variables {
+  name                   = "test"
+  scope                  = "CLOUDFRONT"
+  dead_letter_arn        = "arn:aws:sqs:us-east-1:123456789012:mock-dlq"
+  dead_letter_policy_arn = "arn:aws:iam::123456789012:policy/mock-dlq"
+  kms_master_key_id      = "00000000-0000-0000-0000-000000000000"
+  kms_master_key_arn     = "arn:aws:kms:us-east-1:123456789012:key/00000000-0000-0000-0000-000000000000"
+}
+
+# ---------------------------------------------------------------------------
+# 1. Input unset: the rule names and priorities are exactly today's.
+# ---------------------------------------------------------------------------
+run "input_unset_keeps_todays_rules" {
+  command = plan
+
+  assert {
+    condition = toset([for r in aws_wafv2_web_acl.main.rule : r.name]) == toset([
+      "testwafAWSManagedRulesCommonRuleSet",
+      "testwafBlacklistRule",
+      "testwafHttpFloodRateBasedRule",
+      "testwafSqlInjectionRule",
+      "testwafXssRule",
+    ])
+    error_message = "With path_rate_rules unset, the rule names must equal today's five rules."
+  }
+
+  assert {
+    condition = { for r in aws_wafv2_web_acl.main.rule : r.name => r.priority } == {
+      "testwafAWSManagedRulesCommonRuleSet" = 1
+      "testwafBlacklistRule"                = 4
+      "testwafHttpFloodRateBasedRule"       = 5
+      "testwafSqlInjectionRule"             = 20
+      "testwafXssRule"                      = 30
+    }
+    error_message = "With path_rate_rules unset, the rule priorities must equal today's."
+  }
+}
+
+# Same check with the switches the edge root uses (uploadToS3Activated = true).
+run "input_unset_keeps_todays_rules_edge_switches" {
+  command = plan
+
+  variables {
+    uploadToS3Activated = true
+    uploadToS3Path      = "/upload"
+  }
+
+  assert {
+    condition = toset([for r in aws_wafv2_web_acl.main.rule : r.name]) == toset([
+      "testwafUploadToS3Rule",
+      "testwafAWSManagedRulesCommonRuleSet",
+      "testwafBlacklistRule",
+      "testwafHttpFloodRateBasedRule",
+      "testwafSqlInjectionRule",
+      "testwafXssRule",
+    ])
+    error_message = "With path_rate_rules unset and uploads on, the rule names must equal today's six rules."
+  }
+}
+
+# ---------------------------------------------------------------------------
+# 2. Payload: the two rules from plan 3.1 carry the right values.
+# ---------------------------------------------------------------------------
+run "payload_two_rules" {
+  command = plan
+
+  variables {
+    path_rate_rules = {
+      RecoveryCode = {
+        priority       = 10
+        limit          = 30
+        action         = "count"
+        method         = "POST"
+        uri_path_regex = "^/(en-ca|fr-ca)/login/recovery-code/?$"
+        query_contains = ""
+      }
+      OnboardRecoverySend = {
+        priority       = 11
+        limit          = 30
+        action         = "count"
+        method         = "POST"
+        uri_path_regex = "^/(en-ca|fr-ca)/onboard/?$"
+        query_contains = "/sendRecoveryCode"
+      }
+    }
+  }
+
+  # --- rule set as a whole ---
+  assert {
+    condition = toset([for r in aws_wafv2_web_acl.main.rule : r.name]) == toset([
+      "testwafAWSManagedRulesCommonRuleSet",
+      "testwafBlacklistRule",
+      "testwafHttpFloodRateBasedRule",
+      "testwafSqlInjectionRule",
+      "testwafXssRule",
+      "testwafRateRecoveryCode",
+      "testwafRateOnboardRecoverySend",
+    ])
+    error_message = "Two entries must add exactly two rules, named <name>wafRate<key>, and keep the existing five."
+  }
+
+  assert {
+    condition     = length(distinct([for r in aws_wafv2_web_acl.main.rule : r.priority])) == length(aws_wafv2_web_acl.main.rule)
+    error_message = "Every rule in the ACL must have a unique priority."
+  }
+
+  # --- RecoveryCode ---
+  assert {
+    condition     = one([for r in aws_wafv2_web_acl.main.rule : r.priority if r.name == "testwafRateRecoveryCode"]) == 10
+    error_message = "RecoveryCode priority must be 10."
+  }
+
+  assert {
+    condition     = one([for r in aws_wafv2_web_acl.main.rule : r.statement[0].rate_based_statement[0].limit if r.name == "testwafRateRecoveryCode"]) == 30
+    error_message = "RecoveryCode limit must be 30."
+  }
+
+  assert {
+    condition     = one([for r in aws_wafv2_web_acl.main.rule : r.statement[0].rate_based_statement[0].aggregate_key_type if r.name == "testwafRateRecoveryCode"]) == "IP"
+    error_message = "RecoveryCode must aggregate by IP (never FORWARDED_IP, a client can set that header)."
+  }
+
+  assert {
+    condition     = one([for r in aws_wafv2_web_acl.main.rule : length(r.action[0].count) if r.name == "testwafRateRecoveryCode"]) == 1
+    error_message = "RecoveryCode must have a count action."
+  }
+
+  assert {
+    condition = one([for r in aws_wafv2_web_acl.main.rule :
+      length(r.action[0].block) + length(r.action[0].allow) + length(r.action[0].captcha) + length(r.action[0].challenge)
+    if r.name == "testwafRateRecoveryCode"]) == 0
+    error_message = "RecoveryCode must not block, allow, captcha or challenge (Count only in this release)."
+  }
+
+  assert {
+    condition = one([for r in aws_wafv2_web_acl.main.rule : r.visibility_config[0] if r.name == "testwafRateRecoveryCode"]) == {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "testwafRateRecoveryCode"
+      sampled_requests_enabled   = true
+    }
+    error_message = "RecoveryCode visibility: metrics and sampled requests on, metric name equal to the rule name."
+  }
+
+  # Scope-down: exactly two statements for RecoveryCode (method, path), no query.
+  assert {
+    condition     = one([for r in aws_wafv2_web_acl.main.rule : length(r.statement[0].rate_based_statement[0].scope_down_statement[0].and_statement[0].statement) if r.name == "testwafRateRecoveryCode"]) == 2
+    error_message = "RecoveryCode scope-down must AND exactly two statements (method and path) when query_contains is empty."
+  }
+
+  # Statement 0: method POST, EXACTLY.
+  assert {
+    condition = one([for r in aws_wafv2_web_acl.main.rule : {
+      search   = r.statement[0].rate_based_statement[0].scope_down_statement[0].and_statement[0].statement[0].byte_match_statement[0].search_string
+      position = r.statement[0].rate_based_statement[0].scope_down_statement[0].and_statement[0].statement[0].byte_match_statement[0].positional_constraint
+      method   = length(r.statement[0].rate_based_statement[0].scope_down_statement[0].and_statement[0].statement[0].byte_match_statement[0].field_to_match[0].method)
+    } if r.name == "testwafRateRecoveryCode"]) == { search = "POST", position = "EXACTLY", method = 1 }
+    error_message = "RecoveryCode scope-down statement 0 must be a byte match on the method, EXACTLY \"POST\"."
+  }
+
+  # Statement 1: regex on uri_path.
+  assert {
+    condition = one([for r in aws_wafv2_web_acl.main.rule : {
+      regex = r.statement[0].rate_based_statement[0].scope_down_statement[0].and_statement[0].statement[1].regex_match_statement[0].regex_string
+      path  = length(r.statement[0].rate_based_statement[0].scope_down_statement[0].and_statement[0].statement[1].regex_match_statement[0].field_to_match[0].uri_path)
+    } if r.name == "testwafRateRecoveryCode"]) == { regex = "^/(en-ca|fr-ca)/login/recovery-code/?$", path = 1 }
+    error_message = "RecoveryCode scope-down statement 1 must be a regex match on uri_path with the configured pattern."
+  }
+
+  # Path transformations: URL_DECODE, NORMALIZE_PATH, LOWERCASE, in that order.
+  assert {
+    condition = one([for r in aws_wafv2_web_acl.main.rule : {
+      for t in r.statement[0].rate_based_statement[0].scope_down_statement[0].and_statement[0].statement[1].regex_match_statement[0].text_transformation : tostring(t.priority) => t.type
+    } if r.name == "testwafRateRecoveryCode"]) == { "0" = "URL_DECODE", "1" = "NORMALIZE_PATH", "2" = "LOWERCASE" }
+    error_message = "RecoveryCode path match must apply URL_DECODE (0), NORMALIZE_PATH (1), LOWERCASE (2) and nothing else."
+  }
+
+  # --- OnboardRecoverySend ---
+  assert {
+    condition     = one([for r in aws_wafv2_web_acl.main.rule : r.priority if r.name == "testwafRateOnboardRecoverySend"]) == 11
+    error_message = "OnboardRecoverySend priority must be 11."
+  }
+
+  assert {
+    condition     = one([for r in aws_wafv2_web_acl.main.rule : r.statement[0].rate_based_statement[0].limit if r.name == "testwafRateOnboardRecoverySend"]) == 30
+    error_message = "OnboardRecoverySend limit must be 30."
+  }
+
+  assert {
+    condition     = one([for r in aws_wafv2_web_acl.main.rule : length(r.action[0].count) if r.name == "testwafRateOnboardRecoverySend"]) == 1
+    error_message = "OnboardRecoverySend must have a count action."
+  }
+
+  assert {
+    condition = one([for r in aws_wafv2_web_acl.main.rule :
+      length(r.action[0].block) + length(r.action[0].allow) + length(r.action[0].captcha) + length(r.action[0].challenge)
+    if r.name == "testwafRateOnboardRecoverySend"]) == 0
+    error_message = "OnboardRecoverySend must not block, allow, captcha or challenge."
+  }
+
+  assert {
+    condition     = one([for r in aws_wafv2_web_acl.main.rule : length(r.statement[0].rate_based_statement[0].scope_down_statement[0].and_statement[0].statement) if r.name == "testwafRateOnboardRecoverySend"]) == 3
+    error_message = "OnboardRecoverySend scope-down must AND three statements (method, path, query)."
+  }
+
+  assert {
+    condition = one([for r in aws_wafv2_web_acl.main.rule : {
+      search   = r.statement[0].rate_based_statement[0].scope_down_statement[0].and_statement[0].statement[0].byte_match_statement[0].search_string
+      position = r.statement[0].rate_based_statement[0].scope_down_statement[0].and_statement[0].statement[0].byte_match_statement[0].positional_constraint
+    } if r.name == "testwafRateOnboardRecoverySend"]) == { search = "POST", position = "EXACTLY" }
+    error_message = "OnboardRecoverySend scope-down statement 0 must be EXACTLY \"POST\" on the method."
+  }
+
+  assert {
+    condition     = one([for r in aws_wafv2_web_acl.main.rule : r.statement[0].rate_based_statement[0].scope_down_statement[0].and_statement[0].statement[1].regex_match_statement[0].regex_string if r.name == "testwafRateOnboardRecoverySend"]) == "^/(en-ca|fr-ca)/onboard/?$"
+    error_message = "OnboardRecoverySend scope-down statement 1 must carry the onboard path regex."
+  }
+
+  assert {
+    condition = one([for r in aws_wafv2_web_acl.main.rule : {
+      for t in r.statement[0].rate_based_statement[0].scope_down_statement[0].and_statement[0].statement[1].regex_match_statement[0].text_transformation : tostring(t.priority) => t.type
+    } if r.name == "testwafRateOnboardRecoverySend"]) == { "0" = "URL_DECODE", "1" = "NORMALIZE_PATH", "2" = "LOWERCASE" }
+    error_message = "OnboardRecoverySend path match must apply URL_DECODE, NORMALIZE_PATH, LOWERCASE in that order."
+  }
+
+  # Statement 2: query string CONTAINS "/sendRecoveryCode" after URL_DECODE.
+  assert {
+    condition = one([for r in aws_wafv2_web_acl.main.rule : {
+      search   = r.statement[0].rate_based_statement[0].scope_down_statement[0].and_statement[0].statement[2].byte_match_statement[0].search_string
+      position = r.statement[0].rate_based_statement[0].scope_down_statement[0].and_statement[0].statement[2].byte_match_statement[0].positional_constraint
+      query    = length(r.statement[0].rate_based_statement[0].scope_down_statement[0].and_statement[0].statement[2].byte_match_statement[0].field_to_match[0].query_string)
+      tt = {
+        for t in r.statement[0].rate_based_statement[0].scope_down_statement[0].and_statement[0].statement[2].byte_match_statement[0].text_transformation : tostring(t.priority) => t.type
+      }
+    } if r.name == "testwafRateOnboardRecoverySend"]) == { search = "/sendRecoveryCode", position = "CONTAINS", query = 1, tt = { "0" = "URL_DECODE" } }
+    error_message = "OnboardRecoverySend scope-down statement 2 must be a CONTAINS \"/sendRecoveryCode\" byte match on the query string after URL_DECODE."
+  }
+
+  # The existing flood rule is untouched.
+  assert {
+    condition     = one([for r in aws_wafv2_web_acl.main.rule : r.statement[0].rate_based_statement[0].limit if r.name == "testwafHttpFloodRateBasedRule"]) == 2000
+    error_message = "The existing flood rule limit must stay at the requestThreshold default (2000)."
+  }
+}
+
+# ---------------------------------------------------------------------------
+# 3. Different keys give different rule names (no collision).
+# ---------------------------------------------------------------------------
+run "different_keys_different_names" {
+  command = plan
+
+  variables {
+    path_rate_rules = {
+      A = { priority = 12, limit = 10, action = "count", method = "POST", uri_path_regex = "^/a$", query_contains = "" }
+      B = { priority = 13, limit = 10, action = "count", method = "POST", uri_path_regex = "^/a$", query_contains = "" }
+    }
+  }
+
+  assert {
+    condition     = length([for r in aws_wafv2_web_acl.main.rule : r.name if startswith(r.name, "testwafRate")]) == 2
+    error_message = "Two keys must create two rate rules."
+  }
+
+  assert {
+    condition     = length(distinct([for r in aws_wafv2_web_acl.main.rule : r.name])) == length(aws_wafv2_web_acl.main.rule)
+    error_message = "Every rule name in the ACL must be unique."
+  }
+
+  assert {
+    condition     = one([for r in aws_wafv2_web_acl.main.rule : r.statement[0].rate_based_statement[0].limit if r.name == "testwafRateA"]) == 10
+    error_message = "The AWS minimum limit (10) must be accepted and passed through."
+  }
+}
+
+# ---------------------------------------------------------------------------
+# 4. Validation: every bad value is rejected by var.path_rate_rules.
+# ---------------------------------------------------------------------------
+run "reject_limit_below_10" {
+  command = plan
+  variables {
+    path_rate_rules = {
+      X = { priority = 10, limit = 9, action = "count", method = "POST", uri_path_regex = "^/x$", query_contains = "" }
+    }
+  }
+  expect_failures = [var.path_rate_rules]
+}
+
+run "reject_action_block" {
+  command = plan
+  variables {
+    path_rate_rules = {
+      X = { priority = 10, limit = 30, action = "block", method = "POST", uri_path_regex = "^/x$", query_contains = "" }
+    }
+  }
+  expect_failures = [var.path_rate_rules]
+}
+
+run "reject_action_other" {
+  command = plan
+  variables {
+    path_rate_rules = {
+      X = { priority = 10, limit = 30, action = "allow", method = "POST", uri_path_regex = "^/x$", query_contains = "" }
+    }
+  }
+  expect_failures = [var.path_rate_rules]
+}
+
+run "reject_priority_below_range" {
+  command = plan
+  variables {
+    path_rate_rules = {
+      X = { priority = 5, limit = 30, action = "count", method = "POST", uri_path_regex = "^/x$", query_contains = "" }
+    }
+  }
+  expect_failures = [var.path_rate_rules]
+}
+
+run "reject_priority_above_range" {
+  command = plan
+  variables {
+    path_rate_rules = {
+      X = { priority = 20, limit = 30, action = "count", method = "POST", uri_path_regex = "^/x$", query_contains = "" }
+    }
+  }
+  expect_failures = [var.path_rate_rules]
+}
+
+run "reject_duplicate_priority" {
+  command = plan
+  variables {
+    path_rate_rules = {
+      X = { priority = 10, limit = 30, action = "count", method = "POST", uri_path_regex = "^/x$", query_contains = "" }
+      Y = { priority = 10, limit = 30, action = "count", method = "POST", uri_path_regex = "^/y$", query_contains = "" }
+    }
+  }
+  expect_failures = [var.path_rate_rules]
+}
+
+run "reject_empty_regex" {
+  command = plan
+  variables {
+    path_rate_rules = {
+      X = { priority = 10, limit = 30, action = "count", method = "POST", uri_path_regex = "", query_contains = "" }
+    }
+  }
+  expect_failures = [var.path_rate_rules]
+}
+
+run "reject_regex_over_512" {
+  command = plan
+  variables {
+    path_rate_rules = {
+      X = { priority = 10, limit = 30, action = "count", method = "POST", uri_path_regex = "^/${join("", [for i in range(512) : "a"])}$", query_contains = "" }
+    }
+  }
+  expect_failures = [var.path_rate_rules]
+}
+
+# Boundary positive: 19 is the top of the allowed range and 512 chars is allowed.
+run "accept_boundaries" {
+  command = plan
+  variables {
+    path_rate_rules = {
+      X = { priority = 19, limit = 10, action = "count", method = "POST", uri_path_regex = join("", [for i in range(512) : "a"]), query_contains = "" }
+    }
+  }
+  assert {
+    condition     = one([for r in aws_wafv2_web_acl.main.rule : r.priority if r.name == "testwafRateX"]) == 19
+    error_message = "Priority 19, limit 10 and a 512-character regex must be accepted."
+  }
+}

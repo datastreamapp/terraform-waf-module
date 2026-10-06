@@ -1,19 +1,25 @@
-.PHONY: test test-all test-local test-lambda test-integrity validate fmt lint security build clean clone-upstream tag
+.PHONY: test test-all test-local test-lambda test-integrity test-terraform validate fmt lint security build clean clone-upstream tag
 
 # Default test (quick - no Docker)
-test: validate fmt
+test: validate fmt test-terraform
 
 # Local test suite (Docker-based, no local tool installs needed)
-test-local: validate fmt lint security
+test-local: validate fmt test-terraform lint security
 
 # Full test suite (includes Docker lambda builds + integrity)
-test-all: validate fmt lint security test-lambda test-integrity
+test-all: validate fmt test-terraform lint security test-lambda test-integrity
 
 # Terraform validation
 validate:
 	@echo "==> Terraform validate..."
 	terraform init -backend=false
 	terraform validate
+
+# Terraform native tests (tests/*.tftest.hcl). Mocked AWS provider, plan only,
+# no credentials or AWS calls. Needs Terraform >= 1.7 (mock_provider).
+test-terraform: validate
+	@echo "==> Terraform test (mocked AWS provider)..."
+	terraform test
 
 # Format check
 fmt:
