@@ -40,7 +40,7 @@ variable "path_rate_rules" {
     limit          = number # requests per 300 s per address; 10 to 2,000,000,000 (below 100 needs hashicorp/aws >= 5.66.0)
     action         = string # "count" only in this release
     method         = string # upper-case HTTP method, matched EXACTLY and case-sensitively, for example "POST"
-    uri_path_regex = string # matched after URL_DECODE, NORMALIZE_PATH_WIN, LOWERCASE; 1-512 chars; no upper-case letters outside escapes
+    uri_path_regex = string # matched after URL_DECODE, NORMALIZE_PATH_WIN, LOWERCASE; 1-200 chars (AWS quota); no upper-case letters outside escapes; no literal backslash
     query_contains = string # "" = no query condition; else CONTAINS match after URL_DECODE; printable ASCII, max 200
   }))
   default = {}
@@ -66,8 +66,18 @@ variable "path_rate_rules" {
   }
 
   validation {
-    condition     = alltrue([for r in values(var.path_rate_rules) : length(r.uri_path_regex) >= 1 && length(r.uri_path_regex) <= 512])
-    error_message = "path_rate_rules: uri_path_regex must be 1 to 512 characters."
+    condition     = alltrue([for r in values(var.path_rate_rules) : length(r.uri_path_regex) >= 1 && length(r.uri_path_regex) <= 200])
+    error_message = "path_rate_rules: uri_path_regex must be 1 to 200 characters (AWS WAF regex pattern quota)."
+  }
+
+  validation {
+    # Remove each escape pair (a backslash and a non-backslash, so \S or \d stay
+    # allowed), then reject any backslash that is left: that is a literal
+    # backslash, and NORMALIZE_PATH_WIN turns every "\" in the path into "/",
+    # so it could never match. Uses regexall, not strcontains (Terraform 1.5),
+    # to keep the module's ">= 1.0" floor.
+    condition     = alltrue([for r in values(var.path_rate_rules) : length(regexall("\\\\", replace(r.uri_path_regex, "/\\\\[^\\\\]/", ""))) == 0])
+    error_message = "path_rate_rules: uri_path_regex must not match a literal backslash. NORMALIZE_PATH_WIN turns every \\ in the path into /, so it can never match."
   }
 
   validation {
