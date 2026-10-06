@@ -216,12 +216,13 @@ run "payload_two_rules" {
     error_message = "RecoveryCode scope-down statement 1 must be a regex match on uri_path with the configured pattern."
   }
 
-  # Path transformations: URL_DECODE, NORMALIZE_PATH, LOWERCASE, in that order.
+  # Path transformations: URL_DECODE, NORMALIZE_PATH_WIN, LOWERCASE, in that order.
+  # NORMALIZE_PATH_WIN also turns "\" into "/", which the app's URL parser does too.
   assert {
     condition = one([for r in aws_wafv2_web_acl.main.rule : {
       for t in r.statement[0].rate_based_statement[0].scope_down_statement[0].and_statement[0].statement[1].regex_match_statement[0].text_transformation : tostring(t.priority) => t.type
-    } if r.name == "testwafRateRecoveryCode"]) == { "0" = "URL_DECODE", "1" = "NORMALIZE_PATH", "2" = "LOWERCASE" }
-    error_message = "RecoveryCode path match must apply URL_DECODE (0), NORMALIZE_PATH (1), LOWERCASE (2) and nothing else."
+    } if r.name == "testwafRateRecoveryCode"]) == { "0" = "URL_DECODE", "1" = "NORMALIZE_PATH_WIN", "2" = "LOWERCASE" }
+    error_message = "RecoveryCode path match must apply URL_DECODE (0), NORMALIZE_PATH_WIN (1), LOWERCASE (2) and nothing else."
   }
 
   # --- OnboardRecoverySend ---
@@ -268,8 +269,8 @@ run "payload_two_rules" {
   assert {
     condition = one([for r in aws_wafv2_web_acl.main.rule : {
       for t in r.statement[0].rate_based_statement[0].scope_down_statement[0].and_statement[0].statement[1].regex_match_statement[0].text_transformation : tostring(t.priority) => t.type
-    } if r.name == "testwafRateOnboardRecoverySend"]) == { "0" = "URL_DECODE", "1" = "NORMALIZE_PATH", "2" = "LOWERCASE" }
-    error_message = "OnboardRecoverySend path match must apply URL_DECODE, NORMALIZE_PATH, LOWERCASE in that order."
+    } if r.name == "testwafRateOnboardRecoverySend"]) == { "0" = "URL_DECODE", "1" = "NORMALIZE_PATH_WIN", "2" = "LOWERCASE" }
+    error_message = "OnboardRecoverySend path match must apply URL_DECODE, NORMALIZE_PATH_WIN, LOWERCASE in that order."
   }
 
   # Statement 2: query string CONTAINS "/sendRecoveryCode" after URL_DECODE.
@@ -426,5 +427,187 @@ run "accept_boundaries" {
   assert {
     condition     = one([for r in aws_wafv2_web_acl.main.rule : r.priority if r.name == "testwafRateX"]) == 19
     error_message = "Priority 19, limit 10 and a 512-character regex must be accepted."
+  }
+}
+
+# ---------------------------------------------------------------------------
+# 5. Round 2 validation (reviews of datastreamapp/issues#2252 chunk A).
+#    These are MODULE validations: they run under the mocked provider. The
+#    provider's own argument checks (regex syntax, metric-name characters,
+#    limit range) do NOT run under mock_provider; the caller's real
+#    `terraform plan` is the first place those are checked.
+# ---------------------------------------------------------------------------
+
+# method: WAF matches it EXACTLY and case-sensitively, so only upper-case
+# HTTP methods are accepted.
+run "reject_method_lowercase" {
+  command = plan
+  variables {
+    path_rate_rules = {
+      X = { priority = 10, limit = 30, action = "count", method = "post", uri_path_regex = "^/x$", query_contains = "" }
+    }
+  }
+  expect_failures = [var.path_rate_rules]
+}
+
+run "reject_method_mixedcase" {
+  command = plan
+  variables {
+    path_rate_rules = {
+      X = { priority = 10, limit = 30, action = "count", method = "Post", uri_path_regex = "^/x$", query_contains = "" }
+    }
+  }
+  expect_failures = [var.path_rate_rules]
+}
+
+run "reject_method_empty" {
+  command = plan
+  variables {
+    path_rate_rules = {
+      X = { priority = 10, limit = 30, action = "count", method = "", uri_path_regex = "^/x$", query_contains = "" }
+    }
+  }
+  expect_failures = [var.path_rate_rules]
+}
+
+run "reject_method_misspelled" {
+  command = plan
+  variables {
+    path_rate_rules = {
+      X = { priority = 10, limit = 30, action = "count", method = "POTS", uri_path_regex = "^/x$", query_contains = "" }
+    }
+  }
+  expect_failures = [var.path_rate_rules]
+}
+
+# uri_path_regex: the path is lower-cased before the match, so an upper-case
+# literal can never match. Escape sequences such as \d and \S are allowed.
+run "reject_regex_uppercase" {
+  command = plan
+  variables {
+    path_rate_rules = {
+      X = { priority = 10, limit = 30, action = "count", method = "POST", uri_path_regex = "^/(EN-ca|fr-ca)/x$", query_contains = "" }
+    }
+  }
+  expect_failures = [var.path_rate_rules]
+}
+
+run "accept_regex_with_uppercase_escapes" {
+  command = plan
+  variables {
+    path_rate_rules = {
+      X = { priority = 10, limit = 30, action = "count", method = "GET", uri_path_regex = "^/(en-ca|fr-ca)/x/\\d+/\\S*\\W?\\D?$", query_contains = "" }
+    }
+  }
+  assert {
+    condition     = one([for r in aws_wafv2_web_acl.main.rule : r.statement[0].rate_based_statement[0].scope_down_statement[0].and_statement[0].statement[1].regex_match_statement[0].regex_string if r.name == "testwafRateX"]) == "^/(en-ca|fr-ca)/x/\\d+/\\S*\\W?\\D?$"
+    error_message = "A regex whose only upper-case letters are inside escapes (\\S, \\W, \\D) must be accepted and passed through unchanged."
+  }
+  assert {
+    condition     = one([for r in aws_wafv2_web_acl.main.rule : r.statement[0].rate_based_statement[0].scope_down_statement[0].and_statement[0].statement[0].byte_match_statement[0].search_string if r.name == "testwafRateX"]) == "GET"
+    error_message = "Another upper-case HTTP method (GET) must be accepted."
+  }
+}
+
+# Map key: becomes part of the WAF rule and metric name.
+run "reject_key_with_space" {
+  command = plan
+  variables {
+    path_rate_rules = {
+      "Bad Key" = { priority = 10, limit = 30, action = "count", method = "POST", uri_path_regex = "^/x$", query_contains = "" }
+    }
+  }
+  expect_failures = [var.path_rate_rules]
+}
+
+run "reject_key_over_64" {
+  command = plan
+  variables {
+    path_rate_rules = {
+      (join("", [for i in range(65) : "k"])) = { priority = 10, limit = 30, action = "count", method = "POST", uri_path_regex = "^/x$", query_contains = "" }
+    }
+  }
+  expect_failures = [var.path_rate_rules]
+}
+
+# Entry count: AWS allows 10 rate-based rules per web ACL and the flood rule
+# already uses one. Ten entries with ten unique priorities fail only this check.
+run "reject_ten_entries" {
+  command = plan
+  variables {
+    path_rate_rules = { for i in range(10) : "R${i}" => { priority = 10 + i, limit = 30, action = "count", method = "POST", uri_path_regex = "^/r${i}$", query_contains = "" } }
+  }
+  expect_failures = [var.path_rate_rules]
+}
+
+run "accept_nine_entries" {
+  command = plan
+  variables {
+    path_rate_rules = { for i in range(9) : "R${i}" => { priority = 10 + i, limit = 30, action = "count", method = "POST", uri_path_regex = "^/r${i}$", query_contains = "" } }
+  }
+  assert {
+    condition     = { for r in aws_wafv2_web_acl.main.rule : r.name => r.priority if startswith(r.name, "testwafRate") } == { for i in range(9) : "testwafRateR${i}" => 10 + i }
+    error_message = "Nine entries must give nine rate rules, testwafRateR0..R8 at priorities 10..18."
+  }
+}
+
+# Whole numbers (exercises the floor() terms on their own).
+run "reject_limit_not_whole" {
+  command = plan
+  variables {
+    path_rate_rules = {
+      X = { priority = 10, limit = 10.5, action = "count", method = "POST", uri_path_regex = "^/x$", query_contains = "" }
+    }
+  }
+  expect_failures = [var.path_rate_rules]
+}
+
+run "reject_priority_not_whole" {
+  command = plan
+  variables {
+    path_rate_rules = {
+      X = { priority = 10.5, limit = 30, action = "count", method = "POST", uri_path_regex = "^/x$", query_contains = "" }
+    }
+  }
+  expect_failures = [var.path_rate_rules]
+}
+
+# Limit upper bound (AWS and provider maximum 2,000,000,000).
+run "reject_limit_above_max" {
+  command = plan
+  variables {
+    path_rate_rules = {
+      X = { priority = 10, limit = 2000000001, action = "count", method = "POST", uri_path_regex = "^/x$", query_contains = "" }
+    }
+  }
+  expect_failures = [var.path_rate_rules]
+}
+
+# query_contains: byte match search string is at most 200 bytes (AWS API).
+# Printable ASCII only, so characters equal bytes.
+run "reject_query_over_200" {
+  command = plan
+  variables {
+    path_rate_rules = {
+      X = { priority = 10, limit = 30, action = "count", method = "POST", uri_path_regex = "^/x$", query_contains = join("", [for i in range(201) : "q"]) }
+    }
+  }
+  expect_failures = [var.path_rate_rules]
+}
+
+run "accept_limits_at_max" {
+  command = plan
+  variables {
+    path_rate_rules = {
+      X = { priority = 10, limit = 2000000000, action = "count", method = "POST", uri_path_regex = "^/x$", query_contains = join("", [for i in range(200) : "q"]) }
+    }
+  }
+  assert {
+    condition     = one([for r in aws_wafv2_web_acl.main.rule : r.statement[0].rate_based_statement[0].limit if r.name == "testwafRateX"]) == 2000000000
+    error_message = "limit 2,000,000,000 (the maximum) must be accepted."
+  }
+  assert {
+    condition     = length(one([for r in aws_wafv2_web_acl.main.rule : r.statement[0].rate_based_statement[0].scope_down_statement[0].and_statement[0].statement[2].byte_match_statement[0].search_string if r.name == "testwafRateX"])) == 200
+    error_message = "A 200-character query_contains (the maximum) must be accepted."
   }
 }
