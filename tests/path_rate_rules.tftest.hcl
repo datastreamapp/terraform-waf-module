@@ -197,14 +197,19 @@ run "payload_two_rules" {
     error_message = "RecoveryCode scope-down must AND exactly two statements (method and path) when query_contains is empty."
   }
 
-  # Statement 0: method POST, EXACTLY.
+  # Statement 0: method POST, EXACTLY, transformation NONE. Any other
+  # transformation (for example LOWERCASE) would turn "POST" into something the
+  # case-sensitive "POST" never equals, and the rule would count nothing.
   assert {
     condition = one([for r in aws_wafv2_web_acl.main.rule : {
       search   = r.statement[0].rate_based_statement[0].scope_down_statement[0].and_statement[0].statement[0].byte_match_statement[0].search_string
       position = r.statement[0].rate_based_statement[0].scope_down_statement[0].and_statement[0].statement[0].byte_match_statement[0].positional_constraint
       method   = length(r.statement[0].rate_based_statement[0].scope_down_statement[0].and_statement[0].statement[0].byte_match_statement[0].field_to_match[0].method)
-    } if r.name == "testwafRateRecoveryCode"]) == { search = "POST", position = "EXACTLY", method = 1 }
-    error_message = "RecoveryCode scope-down statement 0 must be a byte match on the method, EXACTLY \"POST\"."
+      tt = {
+        for t in r.statement[0].rate_based_statement[0].scope_down_statement[0].and_statement[0].statement[0].byte_match_statement[0].text_transformation : tostring(t.priority) => t.type
+      }
+    } if r.name == "testwafRateRecoveryCode"]) == { search = "POST", position = "EXACTLY", method = 1, tt = { "0" = "NONE" } }
+    error_message = "RecoveryCode scope-down statement 0 must be a byte match on the method, EXACTLY \"POST\", with only the NONE transformation."
   }
 
   # Statement 1: regex on uri_path.
@@ -257,8 +262,11 @@ run "payload_two_rules" {
     condition = one([for r in aws_wafv2_web_acl.main.rule : {
       search   = r.statement[0].rate_based_statement[0].scope_down_statement[0].and_statement[0].statement[0].byte_match_statement[0].search_string
       position = r.statement[0].rate_based_statement[0].scope_down_statement[0].and_statement[0].statement[0].byte_match_statement[0].positional_constraint
-    } if r.name == "testwafRateOnboardRecoverySend"]) == { search = "POST", position = "EXACTLY" }
-    error_message = "OnboardRecoverySend scope-down statement 0 must be EXACTLY \"POST\" on the method."
+      tt = {
+        for t in r.statement[0].rate_based_statement[0].scope_down_statement[0].and_statement[0].statement[0].byte_match_statement[0].text_transformation : tostring(t.priority) => t.type
+      }
+    } if r.name == "testwafRateOnboardRecoverySend"]) == { search = "POST", position = "EXACTLY", tt = { "0" = "NONE" } }
+    error_message = "OnboardRecoverySend scope-down statement 0 must be EXACTLY \"POST\" on the method, with only the NONE transformation."
   }
 
   assert {
@@ -406,27 +414,32 @@ run "reject_empty_regex" {
   expect_failures = [var.path_rate_rules]
 }
 
-run "reject_regex_over_512" {
+# AWS WAF quota: at most 200 characters per regex pattern. 201 is rejected.
+run "reject_regex_over_200" {
   command = plan
   variables {
     path_rate_rules = {
-      X = { priority = 10, limit = 30, action = "count", method = "POST", uri_path_regex = "^/${join("", [for i in range(512) : "a"])}$", query_contains = "" }
+      X = { priority = 10, limit = 30, action = "count", method = "POST", uri_path_regex = join("", [for i in range(201) : "a"]), query_contains = "" }
     }
   }
   expect_failures = [var.path_rate_rules]
 }
 
-# Boundary positive: 19 is the top of the allowed range and 512 chars is allowed.
+# Boundary positive: 19 is the top of the allowed range and 200 chars is allowed.
 run "accept_boundaries" {
   command = plan
   variables {
     path_rate_rules = {
-      X = { priority = 19, limit = 10, action = "count", method = "POST", uri_path_regex = join("", [for i in range(512) : "a"]), query_contains = "" }
+      X = { priority = 19, limit = 10, action = "count", method = "POST", uri_path_regex = join("", [for i in range(200) : "a"]), query_contains = "" }
     }
   }
   assert {
     condition     = one([for r in aws_wafv2_web_acl.main.rule : r.priority if r.name == "testwafRateX"]) == 19
-    error_message = "Priority 19, limit 10 and a 512-character regex must be accepted."
+    error_message = "Priority 19 must be accepted."
+  }
+  assert {
+    condition     = length(one([for r in aws_wafv2_web_acl.main.rule : r.statement[0].rate_based_statement[0].scope_down_statement[0].and_statement[0].statement[1].regex_match_statement[0].regex_string if r.name == "testwafRateX"])) == 200
+    error_message = "A 200-character regex (the AWS maximum) must be accepted and passed through."
   }
 }
 
@@ -609,5 +622,173 @@ run "accept_limits_at_max" {
   assert {
     condition     = length(one([for r in aws_wafv2_web_acl.main.rule : r.statement[0].rate_based_statement[0].scope_down_statement[0].and_statement[0].statement[2].byte_match_statement[0].search_string if r.name == "testwafRateX"])) == 200
     error_message = "A 200-character query_contains (the maximum) must be accepted."
+  }
+}
+
+# ---------------------------------------------------------------------------
+# 6. Round 3 (final reviews). Module validations only; see the note in section 5.
+# ---------------------------------------------------------------------------
+
+# Priority low edge: 9 is the first value below the range.
+run "reject_priority_9" {
+  command = plan
+  variables {
+    path_rate_rules = {
+      X = { priority = 9, limit = 30, action = "count", method = "POST", uri_path_regex = "^/x$", query_contains = "" }
+    }
+  }
+  expect_failures = [var.path_rate_rules]
+}
+
+# Key high edge: 64 characters is the longest allowed key.
+run "accept_key_64" {
+  command = plan
+  variables {
+    path_rate_rules = {
+      (join("", [for i in range(64) : "k"])) = { priority = 10, limit = 30, action = "count", method = "POST", uri_path_regex = "^/x$", query_contains = "" }
+    }
+  }
+  assert {
+    condition     = one([for r in aws_wafv2_web_acl.main.rule : r.priority if r.name == "testwafRate${join("", [for i in range(64) : "k"])}"]) == 10
+    error_message = "A 64-character key must be accepted and give the rule testwafRate<key> at priority 10."
+  }
+}
+
+# query_contains must be printable ASCII (one byte per character).
+run "reject_query_non_ascii" {
+  command = plan
+  variables {
+    path_rate_rules = {
+      X = { priority = 10, limit = 30, action = "count", method = "POST", uri_path_regex = "^/x$", query_contains = "/sendé" }
+    }
+  }
+  expect_failures = [var.path_rate_rules]
+}
+
+# Every method in the allowed list is accepted and passed through unchanged.
+run "accept_every_allowed_method" {
+  command = plan
+  variables {
+    path_rate_rules = {
+      MGET     = { priority = 10, limit = 30, action = "count", method = "GET", uri_path_regex = "^/x$", query_contains = "" }
+      MHEAD    = { priority = 11, limit = 30, action = "count", method = "HEAD", uri_path_regex = "^/x$", query_contains = "" }
+      MPOST    = { priority = 12, limit = 30, action = "count", method = "POST", uri_path_regex = "^/x$", query_contains = "" }
+      MPUT     = { priority = 13, limit = 30, action = "count", method = "PUT", uri_path_regex = "^/x$", query_contains = "" }
+      MPATCH   = { priority = 14, limit = 30, action = "count", method = "PATCH", uri_path_regex = "^/x$", query_contains = "" }
+      MDELETE  = { priority = 15, limit = 30, action = "count", method = "DELETE", uri_path_regex = "^/x$", query_contains = "" }
+      MOPTIONS = { priority = 16, limit = 30, action = "count", method = "OPTIONS", uri_path_regex = "^/x$", query_contains = "" }
+    }
+  }
+  assert {
+    condition = { for r in aws_wafv2_web_acl.main.rule : r.name => r.statement[0].rate_based_statement[0].scope_down_statement[0].and_statement[0].statement[0].byte_match_statement[0].search_string if startswith(r.name, "testwafRateM") } == {
+      testwafRateMGET     = "GET"
+      testwafRateMHEAD    = "HEAD"
+      testwafRateMPOST    = "POST"
+      testwafRateMPUT     = "PUT"
+      testwafRateMPATCH   = "PATCH"
+      testwafRateMDELETE  = "DELETE"
+      testwafRateMOPTIONS = "OPTIONS"
+    }
+    error_message = "All seven allowed methods must be accepted and used as the EXACTLY search string."
+  }
+}
+
+# The lower-case form of every allowed method is rejected ("post" is covered
+# by reject_method_lowercase).
+run "reject_method_get_lowercase" {
+  command = plan
+  variables {
+    path_rate_rules = {
+      X = { priority = 10, limit = 30, action = "count", method = "get", uri_path_regex = "^/x$", query_contains = "" }
+    }
+  }
+  expect_failures = [var.path_rate_rules]
+}
+
+run "reject_method_head_lowercase" {
+  command = plan
+  variables {
+    path_rate_rules = {
+      X = { priority = 10, limit = 30, action = "count", method = "head", uri_path_regex = "^/x$", query_contains = "" }
+    }
+  }
+  expect_failures = [var.path_rate_rules]
+}
+
+run "reject_method_put_lowercase" {
+  command = plan
+  variables {
+    path_rate_rules = {
+      X = { priority = 10, limit = 30, action = "count", method = "put", uri_path_regex = "^/x$", query_contains = "" }
+    }
+  }
+  expect_failures = [var.path_rate_rules]
+}
+
+run "reject_method_patch_lowercase" {
+  command = plan
+  variables {
+    path_rate_rules = {
+      X = { priority = 10, limit = 30, action = "count", method = "patch", uri_path_regex = "^/x$", query_contains = "" }
+    }
+  }
+  expect_failures = [var.path_rate_rules]
+}
+
+run "reject_method_delete_lowercase" {
+  command = plan
+  variables {
+    path_rate_rules = {
+      X = { priority = 10, limit = 30, action = "count", method = "delete", uri_path_regex = "^/x$", query_contains = "" }
+    }
+  }
+  expect_failures = [var.path_rate_rules]
+}
+
+run "reject_method_options_lowercase" {
+  command = plan
+  variables {
+    path_rate_rules = {
+      X = { priority = 10, limit = 30, action = "count", method = "options", uri_path_regex = "^/x$", query_contains = "" }
+    }
+  }
+  expect_failures = [var.path_rate_rules]
+}
+
+# A literal backslash in the regex (written \\ in the regex) can never match:
+# NORMALIZE_PATH_WIN turns every "\" in the path into "/" before the match.
+run "reject_regex_literal_backslash" {
+  command = plan
+  variables {
+    path_rate_rules = {
+      X = { priority = 10, limit = 30, action = "count", method = "POST", uri_path_regex = "^/en-ca\\\\login$", query_contains = "" }
+    }
+  }
+  expect_failures = [var.path_rate_rules]
+}
+
+# The "\\S" half of the upper-case logic: a literal backslash followed by a
+# literal S. The pair "\\" is removed first, so the S is an upper-case literal.
+run "reject_regex_literal_backslash_then_upper" {
+  command = plan
+  variables {
+    path_rate_rules = {
+      X = { priority = 10, limit = 30, action = "count", method = "POST", uri_path_regex = "^/x\\\\S$", query_contains = "" }
+    }
+  }
+  expect_failures = [var.path_rate_rules]
+}
+
+# Escapes such as \S and \d still pass the backslash check.
+run "accept_regex_escapes_not_literal_backslash" {
+  command = plan
+  variables {
+    path_rate_rules = {
+      X = { priority = 10, limit = 30, action = "count", method = "POST", uri_path_regex = "^/x/\\S+/\\d+$", query_contains = "" }
+    }
+  }
+  assert {
+    condition     = one([for r in aws_wafv2_web_acl.main.rule : r.statement[0].rate_based_statement[0].scope_down_statement[0].and_statement[0].statement[1].regex_match_statement[0].regex_string if r.name == "testwafRateX"]) == "^/x/\\S+/\\d+$"
+    error_message = "A regex with only escapes (\\S, \\d) and no literal backslash must be accepted."
   }
 }
