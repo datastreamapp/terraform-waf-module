@@ -137,9 +137,21 @@ run "payload_two_rules" {
     error_message = "Two entries must add exactly two rules, named <name>wafRate<key>, and keep the existing five."
   }
 
+  # Exact name => priority map. All seven priorities differ, so this also proves
+  # no collision with the module's own rules. (length() and distinct() over the
+  # rule set are unknown at plan time: the blacklist rule carries IP set ARNs
+  # that only exist after apply, so the set size is not known yet.)
   assert {
-    condition     = length(distinct([for r in aws_wafv2_web_acl.main.rule : r.priority])) == length(aws_wafv2_web_acl.main.rule)
-    error_message = "Every rule in the ACL must have a unique priority."
+    condition = { for r in aws_wafv2_web_acl.main.rule : r.name => r.priority } == {
+      "testwafAWSManagedRulesCommonRuleSet" = 1
+      "testwafBlacklistRule"                = 4
+      "testwafHttpFloodRateBasedRule"       = 5
+      "testwafRateRecoveryCode"             = 10
+      "testwafRateOnboardRecoverySend"      = 11
+      "testwafSqlInjectionRule"             = 20
+      "testwafXssRule"                      = 30
+    }
+    error_message = "Rule priorities must be the module's own (1, 4, 5, 20, 30) plus 10 and 11 for the new rules."
   }
 
   # --- RecoveryCode ---
@@ -298,9 +310,19 @@ run "different_keys_different_names" {
     error_message = "Two keys must create two rate rules."
   }
 
+  # Seven distinct names, including both keys, means the two keys did not collapse
+  # into one rule name.
   assert {
-    condition     = length(distinct([for r in aws_wafv2_web_acl.main.rule : r.name])) == length(aws_wafv2_web_acl.main.rule)
-    error_message = "Every rule name in the ACL must be unique."
+    condition = toset([for r in aws_wafv2_web_acl.main.rule : r.name]) == toset([
+      "testwafAWSManagedRulesCommonRuleSet",
+      "testwafBlacklistRule",
+      "testwafHttpFloodRateBasedRule",
+      "testwafSqlInjectionRule",
+      "testwafXssRule",
+      "testwafRateA",
+      "testwafRateB",
+    ])
+    error_message = "Keys A and B must give two distinct rules, testwafRateA and testwafRateB."
   }
 
   assert {
