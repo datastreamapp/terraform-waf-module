@@ -35,7 +35,7 @@ This document describes how to test the terraform-waf-module before deployment.
 
 | Tool | Required | Purpose | Install |
 |------|----------|---------|---------|
-| Terraform | Yes | Infrastructure validation | `brew install terraform` |
+| Terraform | Yes (1.7 or newer for `terraform test`) | Infrastructure validation and Terraform tests (`mock_provider` needs 1.7+) | `brew install terraform` |
 | Docker | Yes | Lambda builds + security scans | `brew install docker` |
 | AWS CLI | Optional | AWS credentials for plan | `brew install awscli` |
 | act | Optional | Run GitHub Actions locally | `brew install act` |
@@ -58,6 +58,9 @@ make test-all
 
 # System integrity only (no Docker)
 make test-integrity
+
+# Terraform tests only (mocked AWS provider, no credentials)
+make test-terraform
 ```
 
 ---
@@ -66,11 +69,12 @@ make test-integrity
 
 | Target | Tests | Docker | Description |
 |--------|-------|--------|-------------|
-| `make test` | 2 | No | Terraform validate + fmt |
-| `make test-local` | 2 + lint + security | Yes | Full validation without Lambda |
+| `make test` | 2 + 41 | No | Terraform validate + fmt + Terraform tests |
+| `make test-terraform` | 41 | No | Terraform tests in `tests/` (mocked AWS provider, plan only) |
+| `make test-local` | 2 + 41 + lint + security | Yes | Full validation without Lambda |
 | `make test-lambda` | 50 | Yes | Build and validate both Lambda zips (25 + 24) |
 | `make test-integrity` | 58 | No | Cross-file consistency, version alignment, git hygiene |
-| `make test-all` | **108+** | Yes | Everything: validate, fmt, lint, security, Lambda builds, integrity |
+| `make test-all` | **149+** | Yes | Everything: validate, fmt, Terraform tests, lint, security, Lambda builds, integrity |
 
 ### Important: validate vs plan
 
@@ -78,6 +82,7 @@ make test-integrity
 |---------|---------|---------------|---------------------|
 | `terraform validate` | Syntax & config check | No | No |
 | `terraform plan` | Pre-deployment preview | Yes | Yes (all required vars) |
+| `terraform test` | Plans the module against a mocked AWS provider and checks assertions | No | No (set in the test file) |
 
 **Why this matters:**
 - `make test` and `make test-all` use `terraform validate` — no AWS credentials or variable values needed
@@ -205,6 +210,59 @@ STATUS: PASSED
 | Validate | `terraform validate` | HCL syntax, resource references, type checking |
 | Format | `terraform fmt -check -recursive` | Consistent formatting |
 | Lint | tflint | Variable declarations, deprecated syntax, AWS-specific issues |
+| Terraform test | `terraform test` (`tests/path_rate_rules.tftest.hcl`) | The `path_rate_rules` rules as planned: names, priorities, limits, count action, scope-down, text transformations, input-unset regression, input validation |
+
+#### `tests/path_rate_rules.tftest.hcl` (41 runs)
+
+Uses `mock_provider "aws"` with `command = plan`, so it needs no AWS credentials and makes no AWS calls. Needs Terraform 1.7 or newer; CI pins `terraform_version` in `.github/workflows/test.yml`. The four `aws_iam_policy_document` data sources, `aws_region`, `aws_caller_identity` and `aws_ssm_parameter` are mocked with fixed values.
+
+| Run | Type | What it checks |
+|-----|------|----------------|
+| `input_unset_keeps_todays_rules` | Positive (regression) | Input unset: rule names and priorities equal today's five rules |
+| `input_unset_keeps_todays_rules_edge_switches` | Positive (regression) | Same with `uploadToS3Activated = true` (as the edge root sets it): six rules |
+| `payload_two_rules` | Positive | Two entries: exact name and priority map, limit, `IP` aggregation, count action and no other action, visibility config, method `EXACTLY POST` with only the `NONE` transformation (both rules), path regex, transformations `URL_DECODE`, `NORMALIZE_PATH_WIN`, `LOWERCASE` in order, query `CONTAINS /sendRecoveryCode` after `URL_DECODE`, flood rule untouched |
+| `different_keys_different_names` | Positive | Two keys give two distinct rule names; limit 10 accepted |
+| `reject_limit_below_10` | Negative | Limit 9 rejected |
+| `reject_action_block` | Negative | Action `block` rejected (Count only) |
+| `reject_action_other` | Negative | Action `allow` rejected |
+| `reject_priority_below_range` | Negative | Priority 5 rejected |
+| `reject_priority_above_range` | Negative | Priority 20 rejected |
+| `reject_duplicate_priority` | Negative | Two entries with the same priority rejected |
+| `reject_empty_regex` | Negative | Empty `uri_path_regex` rejected |
+| `reject_regex_over_200` | Negative | 201-character regex rejected (AWS WAF quota: 200 characters per regex pattern) |
+| `accept_boundaries` | Positive (boundary) | Priority 19, limit 10 and a 200-character regex accepted |
+| `reject_method_lowercase` | Negative | Method `post` rejected |
+| `reject_method_mixedcase` | Negative | Method `Post` rejected |
+| `reject_method_empty` | Negative | Empty method rejected |
+| `reject_method_misspelled` | Negative | Method `POTS` rejected |
+| `reject_regex_uppercase` | Negative | Regex with an upper-case literal (`EN-ca`) rejected |
+| `accept_regex_with_uppercase_escapes` | Positive | Regex whose only upper-case letters are in escapes (`\S`, `\W`, `\D`) accepted and passed through; method `GET` accepted |
+| `reject_key_with_space` | Negative | Key `Bad Key` rejected |
+| `reject_key_over_64` | Negative | 65-character key rejected |
+| `reject_ten_entries` | Negative | 10 entries rejected (10 rate-based rules per ACL, the flood rule uses one) |
+| `accept_nine_entries` | Positive (boundary) | 9 entries give 9 rules at priorities 10 to 18 |
+| `reject_limit_not_whole` | Negative | Limit 10.5 rejected |
+| `reject_priority_not_whole` | Negative | Priority 10.5 rejected |
+| `reject_limit_above_max` | Negative | Limit 2,000,000,001 rejected |
+| `reject_query_over_200` | Negative | 201-character `query_contains` rejected |
+| `accept_limits_at_max` | Positive (boundary) | Limit 2,000,000,000 and a 200-character `query_contains` accepted |
+| `reject_priority_9` | Negative (boundary) | Priority 9, the first value below the range, rejected |
+| `accept_key_64` | Positive (boundary) | A 64-character key accepted, rule at priority 10 |
+| `reject_query_non_ascii` | Negative | `query_contains = "/sendé"` (not printable ASCII) rejected |
+| `accept_every_allowed_method` | Positive | All seven methods (`GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS`) accepted and used as the search string |
+| `reject_method_get_lowercase` | Negative | Method `get` rejected |
+| `reject_method_head_lowercase` | Negative | Method `head` rejected |
+| `reject_method_put_lowercase` | Negative | Method `put` rejected |
+| `reject_method_patch_lowercase` | Negative | Method `patch` rejected |
+| `reject_method_delete_lowercase` | Negative | Method `delete` rejected |
+| `reject_method_options_lowercase` | Negative | Method `options` rejected |
+| `reject_regex_literal_backslash` | Negative | Regex with a literal backslash (`^/en-ca\\login$`) rejected |
+| `reject_regex_literal_backslash_then_upper` | Negative | Regex `^/x\\S$` (literal backslash, then a literal `S`) rejected |
+| `accept_regex_escapes_not_literal_backslash` | Positive | Regex `^/x/\S+/\d+$` (escapes only) accepted and passed through |
+
+**What these tests do not cover.** `mock_provider` does not run the provider's own argument validators. The tests prove the module's wiring and the module's own `validation` blocks. They do not prove that the provider or AWS accepts the values. The caller's real plan is the first check of provider limits (the limit range on older provider versions, regex syntax, metric-name characters). AWS checks regex acceptance at the first deploy.
+
+Plan-time limit: the rule set holds IP set ARNs that are unknown until apply, so `length()` or `distinct()` over the whole set cannot be asserted at plan time. The tests assert exact name maps and pick single rules by name instead.
 
 ### Security Tests
 
@@ -344,7 +402,7 @@ Recorded 2026-01-28 from local Docker builds on `feature/801-add-required-depend
 
 | Target | Description | Requirements |
 |--------|-------------|--------------|
-| `make test` | Quick tests (validate + fmt) | Terraform only |
+| `make test` | Quick tests (validate + fmt + Terraform tests) | Terraform 1.7+ only |
 | `make test-local` | Full tests except Lambda | Terraform + Docker |
 | `make test-all` | Complete test suite | Terraform + Docker |
 
@@ -358,6 +416,7 @@ Recorded 2026-01-28 from local Docker builds on `feature/801-add-required-depend
 | `make security` | Run tfsec + checkov | Yes |
 | `make test-lambda` | Build & test Lambda packages | Yes |
 | `make test-integrity` | System integrity checks | No |
+| `make test-terraform` | Terraform init + validate + `terraform test` (mocked AWS provider) | No |
 | `make build` | Build Docker image only | Yes |
 | `make clean` | Remove .terraform | No |
 | `make clean-all` | Remove .terraform + upstream | No |

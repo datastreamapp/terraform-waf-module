@@ -39,7 +39,7 @@ permissions:
 
 **Why**: Restricts workflow to read-only access. Required by security check `CKV2_GHA_1` (checkov). Follows principle of least privilege.
 
-### Job: terraform (Lines 14-51)
+### Job: terraform (Lines 14-57)
 
 Validates Terraform configuration and runs security scans.
 
@@ -52,16 +52,19 @@ Validates Terraform configuration and runs security scans.
 
 Clones the repository into the runner.
 
-#### Step: Setup Terraform (Lines 21-22)
+#### Step: Setup Terraform (Lines 21-25)
 
 ```yaml
 - name: Setup Terraform
   uses: hashicorp/setup-terraform@v3
+  with:
+    # terraform test with mock_provider needs Terraform >= 1.7
+    terraform_version: "1.15.1"
 ```
 
-Installs latest Terraform CLI using HashiCorp's official action.
+Installs the Terraform CLI using HashiCorp's official action, pinned to `"1.15.1"` (quoted, so YAML always reads it as a string; an unquoted `1.20` would become the number 1.2). The pin exists because the Terraform Test step uses `mock_provider`, which needs Terraform 1.7 or newer. The module itself still declares `required_version = ">= 1.0"` (`versions.tf`). The version is written without a `v` prefix so the upstream version check in `scripts/test-integrity.sh` (which looks for `v4.1.2`) is not affected.
 
-#### Step: Terraform Init (Lines 24-25)
+#### Step: Terraform Init (Lines 27-28)
 
 ```yaml
 - name: Terraform Init
@@ -73,7 +76,7 @@ Initializes Terraform providers without configuring a backend. The `-backend=fal
 - Doesn't require AWS credentials
 - Only downloads required providers
 
-#### Step: Terraform Validate (Lines 27-28)
+#### Step: Terraform Validate (Lines 30-31)
 
 ```yaml
 - name: Terraform Validate
@@ -88,7 +91,7 @@ Validates Terraform syntax and configuration. Checks:
 
 **Note**: May show deprecation warning for `data.aws_region.current.name` - this is expected and harmless.
 
-#### Step: Terraform Format Check (Lines 30-31)
+#### Step: Terraform Format Check (Lines 33-34)
 
 ```yaml
 - name: Terraform Format Check
@@ -99,7 +102,16 @@ Verifies all `.tf` files are properly formatted. Flags:
 - `-check` - Exit with error if files need formatting (don't modify)
 - `-recursive` - Check all subdirectories
 
-#### Step: Setup tflint (Lines 33-34)
+#### Step: Terraform Test (Lines 36-37)
+
+```yaml
+- name: Terraform Test
+  run: terraform test
+```
+
+Runs every `tests/*.tftest.hcl` file. Today that is `tests/path_rate_rules.tftest.hcl` (41 runs). The tests use `mock_provider "aws"` and `command = plan`, so they need no AWS credentials and make no AWS calls. They check the `path_rate_rules` rules as planned (names, priorities, limits, count action, scope-down, text transformations), that leaving the input unset keeps today's rules, and that bad input is rejected by the module's own validation. The mocked provider does not run the provider's argument checks; the caller's real plan is the first place those run. Run locally with `make test-terraform`. See `docs/TESTING.md`.
+
+#### Step: Setup tflint (Lines 39-40)
 
 ```yaml
 - name: Setup tflint
@@ -108,7 +120,7 @@ Verifies all `.tf` files are properly formatted. Flags:
 
 Installs tflint linter using the official action.
 
-#### Step: Run tflint (Lines 36-39)
+#### Step: Run tflint (Lines 42-45)
 
 ```yaml
 - name: Run tflint
@@ -129,7 +141,7 @@ Checks for:
 - AWS-specific best practices
 - Deprecated syntax
 
-#### Step: Run tfsec (Lines 41-44)
+#### Step: Run tfsec (Lines 47-50)
 
 ```yaml
 - name: Run tfsec
@@ -152,7 +164,7 @@ Checks for:
 - CloudWatch logs not KMS encrypted (uses default encryption)
 - Lambda not in VPC (not required for this use case)
 
-#### Step: Run checkov (Lines 46-51)
+#### Step: Run checkov (Lines 52-57)
 
 ```yaml
 - name: Run checkov
@@ -175,11 +187,11 @@ Checks for:
 
 ---
 
-### Job: lambda (Lines 53-91)
+### Job: lambda (Lines 59-105)
 
 Tests Lambda build process using Docker.
 
-#### Step: Clone upstream source (Lines 60-63)
+#### Step: Clone upstream source (Lines 66-69)
 
 ```yaml
 - name: Clone upstream source
@@ -194,7 +206,7 @@ Clones AWS's official WAF security automations repository. Options:
 
 **Why v4.1.2?** This matches the upstream version our module is synced with (v4.0.0 release). See [upstream CHANGELOG](https://github.com/aws-solutions/aws-waf-security-automations/blob/main/CHANGELOG.md).
 
-#### Step: Build Docker image (Lines 65-66)
+#### Step: Build Docker image (Lines 71-72)
 
 ```yaml
 - name: Build Docker image
@@ -206,7 +218,7 @@ Builds the Lambda builder Docker image:
 - `-f scripts/Dockerfile.lambda-builder` - Use our Dockerfile
 - `scripts/` - Build context directory
 
-#### Step: Test log_parser build (Lines 68-73)
+#### Step: Test log_parser build (Lines 82-87)
 
 ```yaml
 - name: Test log_parser build
@@ -229,7 +241,7 @@ Arguments to build script:
 
 This runs 9 validation tests (see scripts/README.md).
 
-#### Step: Test reputation_lists_parser build (Lines 75-80)
+#### Step: Test reputation_lists_parser build (Lines 89-94)
 
 ```yaml
 - name: Test reputation_lists_parser build
@@ -242,7 +254,7 @@ This runs 9 validation tests (see scripts/README.md).
 
 Same process for reputation_lists_parser package.
 
-#### Step: Summary (Lines 82-91)
+#### Step: Summary (Lines 96-105)
 
 ```yaml
 - name: Summary
@@ -507,10 +519,11 @@ PR features:
 │   │ 3. terraform init   │     │ 3. Build Docker     │          │
 │   │ 4. terraform valid  │     │ 4. Build log_parser │          │
 │   │ 5. terraform fmt    │     │ 5. Build rep_lists  │          │
-│   │ 6. Setup tflint     │     │ 6. Summary          │          │
-│   │ 7. Run tflint       │     └─────────────────────┘          │
-│   │ 8. Run tfsec        │                                       │
-│   │ 9. Run checkov      │                                       │
+│   │ 6. terraform test   │     │ 6. Summary          │          │
+│   │ 7. Setup tflint     │     └─────────────────────┘          │
+│   │ 8. Run tflint       │                                       │
+│   │ 9. Run tfsec        │                                       │
+│   │ 10. Run checkov     │                                       │
 │   └─────────────────────┘                                       │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
